@@ -124,3 +124,75 @@ export async function getArchivedBlocks() {
         return [];
     }
 }
+
+// Get all task blocks (TODO, DOING, DONE, ARCHIVED) for search
+export async function getAllTaskBlocks() {
+    try {
+        console.log("Fetching all task blocks for search...");
+        
+        const query = `
+            [:find ?uid ?string ?create-time ?edit-time ?page-title ?order
+             :where
+             [?b :block/uid ?uid]
+             [?b :block/string ?string]
+             (or [(clojure.string/includes? ?string "{{[[TODO]]}}")]
+                 [(clojure.string/includes? ?string "{{[[DOING]]}}")]
+                 [(clojure.string/includes? ?string "{{[[DONE]]}}")]
+                 [(clojure.string/includes? ?string "{{[[ARCHIVED]]}}")])
+             [?b :block/page ?page]
+             [?page :node/title ?page-title]
+             [?b :block/order ?order]
+             (or-join [?b ?create-time]
+               (and [?b :create/time ?create-time])
+               (and [(missing? $ ?b :create/time)]
+                    [(ground 0) ?create-time]))
+             (or-join [?b ?edit-time]
+               (and [?b :edit/time ?edit-time])
+               (and [(missing? $ ?b :edit/time)]
+                    [(ground 0) ?edit-time]))]
+        `;
+        
+        const results = await window.roamAlphaAPI.q(query);
+        console.log(`Found ${results.length} total task blocks`);
+        
+        return results.map(([uid, content, createTime, editTime, pageTitle, order]) => ({
+            uid,
+            content,
+            createTime: createTime || null,
+            editTime: editTime || null,
+            pageTitle: pageTitle || "Untitled",
+            order: order || 0
+        }));
+    } catch (error) {
+        console.error("Error fetching all task blocks:", error);
+        return [];
+    }
+}
+
+// Get children blocks for a given parent UID
+export async function getChildrenBlocks(parentUid) {
+    try {
+        const query = `
+            [:find ?uid ?string ?order
+             :where
+             [?parent :block/uid "${parentUid}"]
+             [?parent :block/children ?child]
+             [?child :block/uid ?uid]
+             [?child :block/string ?string]
+             [?child :block/order ?order]]
+        `;
+        
+        const results = await window.roamAlphaAPI.q(query);
+        
+        return results
+            .map(([uid, content, order]) => ({
+                uid,
+                content,
+                order: order || 0
+            }))
+            .sort((a, b) => a.order - b.order);
+    } catch (error) {
+        console.error("Error fetching children blocks:", error);
+        return [];
+    }
+}

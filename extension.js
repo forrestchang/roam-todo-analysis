@@ -130,6 +130,78 @@ async function getArchivedBlocks() {
         return [];
     }
 }
+
+// Get all task blocks (TODO, DOING, DONE, ARCHIVED) for search
+async function getAllTaskBlocks() {
+    try {
+        console.log("Fetching all task blocks for search...");
+        
+        const query = `
+            [:find ?uid ?string ?create-time ?edit-time ?page-title ?order
+             :where
+             [?b :block/uid ?uid]
+             [?b :block/string ?string]
+             (or [(clojure.string/includes? ?string "{{[[TODO]]}}")]
+                 [(clojure.string/includes? ?string "{{[[DOING]]}}")]
+                 [(clojure.string/includes? ?string "{{[[DONE]]}}")]
+                 [(clojure.string/includes? ?string "{{[[ARCHIVED]]}}")])
+             [?b :block/page ?page]
+             [?page :node/title ?page-title]
+             [?b :block/order ?order]
+             (or-join [?b ?create-time]
+               (and [?b :create/time ?create-time])
+               (and [(missing? $ ?b :create/time)]
+                    [(ground 0) ?create-time]))
+             (or-join [?b ?edit-time]
+               (and [?b :edit/time ?edit-time])
+               (and [(missing? $ ?b :edit/time)]
+                    [(ground 0) ?edit-time]))]
+        `;
+        
+        const results = await window.roamAlphaAPI.q(query);
+        console.log(`Found ${results.length} total task blocks`);
+        
+        return results.map(([uid, content, createTime, editTime, pageTitle, order]) => ({
+            uid,
+            content,
+            createTime: createTime || null,
+            editTime: editTime || null,
+            pageTitle: pageTitle || "Untitled",
+            order: order || 0
+        }));
+    } catch (error) {
+        console.error("Error fetching all task blocks:", error);
+        return [];
+    }
+}
+
+// Get children blocks for a given parent UID
+async function getChildrenBlocks(parentUid) {
+    try {
+        const query = `
+            [:find ?uid ?string ?order
+             :where
+             [?parent :block/uid "${parentUid}"]
+             [?parent :block/children ?child]
+             [?child :block/uid ?uid]
+             [?child :block/string ?string]
+             [?child :block/order ?order]]
+        `;
+        
+        const results = await window.roamAlphaAPI.q(query);
+        
+        return results
+            .map(([uid, content, order]) => ({
+                uid,
+                content,
+                order: order || 0
+            }))
+            .sort((a, b) => a.order - b.order);
+    } catch (error) {
+        console.error("Error fetching children blocks:", error);
+        return [];
+    }
+}
 // ========== utils module ==========
 // Utility functions for text processing and date calculations
 
@@ -175,6 +247,62 @@ function getScoreEmoji(score) {
     if (score >= 60) return "👍";
     if (score >= 50) return "📈";
     return "💪";
+}
+
+// Simple fuzzy search implementation
+function fuzzySearch(query, text) {
+    if (!query || !text) return false;
+    
+    query = query.toLowerCase();
+    text = text.toLowerCase();
+    
+    // Exact match
+    if (text.includes(query)) return true;
+    
+    // Fuzzy match - all characters in query must appear in text in order
+    let queryIndex = 0;
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+        if (text[i] === query[queryIndex]) {
+            queryIndex++;
+        }
+    }
+    
+    return queryIndex === query.length;
+}
+
+// Calculate fuzzy search score
+function fuzzySearchScore(query, text) {
+    if (!query || !text) return 0;
+    
+    query = query.toLowerCase();
+    text = text.toLowerCase();
+    
+    // Exact match gets highest score
+    if (text === query) return 1000;
+    
+    // Contains exact query
+    if (text.includes(query)) return 500;
+    
+    // Fuzzy match scoring
+    let score = 0;
+    let queryIndex = 0;
+    let consecutiveMatches = 0;
+    
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+        if (text[i] === query[queryIndex]) {
+            score += 10;
+            consecutiveMatches++;
+            if (consecutiveMatches > 1) {
+                score += consecutiveMatches * 5; // Bonus for consecutive matches
+            }
+            queryIndex++;
+        } else {
+            consecutiveMatches = 0;
+        }
+    }
+    
+    // Only return score if all characters were found
+    return queryIndex === query.length ? score : 0;
 }
 // ========== analytics module ==========
 // Analytics calculations for TODO tasks
@@ -1675,7 +1803,6 @@ function createLogbookView(container, analytics) {
                 `;
                 
                 try {
-                    const { getArchivedBlocks } = await import('./queries.js');
                     archivedBlocks = await getArchivedBlocks();
                 } catch (error) {
                     console.error("Error fetching archived blocks:", error);
@@ -1692,6 +1819,265 @@ function createLogbookView(container, analytics) {
     populatePageFilter();
     updateViewButtons();
     updateLogbook();
+}
+
+// Create search view
+function createSearchView(container) {
+    // Search input container
+    const searchContainer = document.createElement("div");
+    searchContainer.style.cssText = "margin-bottom: 20px;";
+    
+    const searchInputWrapper = document.createElement("div");
+    searchInputWrapper.style.cssText = "position: relative;";
+    
+    const searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.className = "bp3-input bp3-large";
+    searchInput.placeholder = "Search all tasks (fuzzy search)...";
+    searchInput.style.cssText = "width: 100%; padding-left: 40px;";
+    
+    const searchIcon = document.createElement("span");
+    searchIcon.className = "bp3-icon bp3-icon-search";
+    searchIcon.style.cssText = "position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none;";
+    
+    searchInputWrapper.appendChild(searchIcon);
+    searchInputWrapper.appendChild(searchInput);
+    searchContainer.appendChild(searchInputWrapper);
+    
+    // Stats and filters
+    const controlsBar = document.createElement("div");
+    controlsBar.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;";
+    
+    const statsDiv = document.createElement("div");
+    statsDiv.style.cssText = "color: #5c7080; font-size: 14px;";
+    
+    const filtersDiv = document.createElement("div");
+    filtersDiv.style.cssText = "display: flex; gap: 8px;";
+    
+    // Task type filters
+    const typeFilters = [
+        { value: 'all', label: 'All Tasks', color: '#5c7080' },
+        { value: 'TODO', label: 'TODO', color: '#db3737' },
+        { value: 'DOING', label: 'DOING', color: '#d9822b' },
+        { value: 'DONE', label: 'DONE', color: '#0f9960' },
+        { value: 'ARCHIVED', label: 'ARCHIVED', color: '#5c7080' }
+    ];
+    
+    let selectedType = 'all';
+    const typeButtons = {};
+    
+    typeFilters.forEach(filter => {
+        const btn = document.createElement("button");
+        btn.className = "bp3-button bp3-small";
+        if (filter.value === 'all') btn.classList.add('bp3-intent-primary');
+        btn.textContent = filter.label;
+        btn.onclick = () => {
+            selectedType = filter.value;
+            Object.values(typeButtons).forEach(b => b.classList.remove('bp3-intent-primary'));
+            btn.classList.add('bp3-intent-primary');
+            performSearch();
+        };
+        typeButtons[filter.value] = btn;
+        filtersDiv.appendChild(btn);
+    });
+    
+    controlsBar.appendChild(statsDiv);
+    controlsBar.appendChild(filtersDiv);
+    
+    // Results container
+    const resultsContainer = document.createElement("div");
+    resultsContainer.style.cssText = "max-height: 600px; overflow-y: auto; border: 1px solid #e1e8ed; border-radius: 6px; background: white;";
+    
+    container.appendChild(searchContainer);
+    container.appendChild(controlsBar);
+    container.appendChild(resultsContainer);
+    
+    // State
+    let allTasks = [];
+    let searchTimeout;
+    
+    // Load all tasks
+    const loadAllTasks = async () => {
+        resultsContainer.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div class="bp3-spinner">
+                    <div class="bp3-spinner-animation"></div>
+                </div>
+                <div style="margin-top: 16px; color: #5c7080;">Loading all tasks...</div>
+            </div>
+        `;
+        
+        try {
+            allTasks = await getAllTaskBlocks();
+            statsDiv.textContent = `${allTasks.length} total tasks`;
+            performSearch();
+        } catch (error) {
+            console.error("Error loading tasks:", error);
+            resultsContainer.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #d13913;">
+                    <div>Error loading tasks</div>
+                </div>
+            `;
+        }
+    };
+    
+    // Perform search
+    const performSearch = async () => {
+        const query = searchInput.value.trim();
+        
+        // Filter by type
+        let filteredTasks = selectedType === 'all' 
+            ? allTasks 
+            : allTasks.filter(task => task.content.includes(`{{[[${selectedType}]]}}`));
+        
+        // Apply fuzzy search
+        if (query) {
+            filteredTasks = filteredTasks
+                .map(task => ({
+                    ...task,
+                    searchScore: fuzzySearchScore(query, task.content)
+                }))
+                .filter(task => task.searchScore > 0)
+                .sort((a, b) => b.searchScore - a.searchScore);
+        }
+        
+        // Update stats
+        statsDiv.textContent = `${filteredTasks.length} ${query ? 'matching' : 'total'} tasks`;
+        
+        // Display results
+        displaySearchResults(filteredTasks, query);
+    };
+    
+    // Display search results
+    const displaySearchResults = (tasks, query) => {
+        resultsContainer.innerHTML = "";
+        
+        if (tasks.length === 0) {
+            resultsContainer.innerHTML = `
+                <div style="text-align: center; padding: 60px 20px; color: #5c7080;">
+                    <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;">🔍</div>
+                    <div style="font-size: 16px;">No tasks found</div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Group by page
+        const tasksByPage = {};
+        tasks.forEach(task => {
+            if (!tasksByPage[task.pageTitle]) {
+                tasksByPage[task.pageTitle] = [];
+            }
+            tasksByPage[task.pageTitle].push(task);
+        });
+        
+        // Display grouped results
+        Object.entries(tasksByPage).forEach(([pageTitle, pageTasks]) => {
+            const pageSection = document.createElement("div");
+            pageSection.style.cssText = "border-bottom: 1px solid #e1e8ed;";
+            
+            // Page header
+            const pageHeader = document.createElement("div");
+            pageHeader.style.cssText = "padding: 12px 16px; background: #f5f8fa; font-weight: 600; color: #182026; cursor: pointer; display: flex; justify-content: space-between; align-items: center;";
+            pageHeader.innerHTML = `
+                <span>📄 ${pageTitle}</span>
+                <span style="font-size: 12px; font-weight: normal; color: #5c7080;">${pageTasks.length} task${pageTasks.length > 1 ? 's' : ''}</span>
+            `;
+            
+            // Tasks container
+            const tasksContainer = document.createElement("div");
+            tasksContainer.style.cssText = "padding: 8px 0;";
+            
+            // Display tasks
+            pageTasks.forEach(task => {
+                const taskEl = document.createElement("div");
+                taskEl.style.cssText = "padding: 12px 16px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent;";
+                
+                // Determine task type and color
+                let taskType = 'TODO';
+                let taskColor = '#db3737';
+                if (task.content.includes('{{[[DONE]]}}')) {
+                    taskType = 'DONE';
+                    taskColor = '#0f9960';
+                } else if (task.content.includes('{{[[DOING]]}}')) {
+                    taskType = 'DOING';
+                    taskColor = '#d9822b';
+                } else if (task.content.includes('{{[[ARCHIVED]]}}')) {
+                    taskType = 'ARCHIVED';
+                    taskColor = '#5c7080';
+                }
+                
+                // Clean content
+                const cleanContent = task.content
+                    .replace(/\{\{\[\[DONE\]\]\}\}|\{\{\[\[TODO\]\]\}\}|\{\{\[\[DOING\]\]\}\}|\{\{\[\[ARCHIVED\]\]\}\}/g, '')
+                    .trim();
+                
+                // Highlight search term
+                const displayContent = query ? 
+                    highlightSearchTerm(cleanContent, query) : 
+                    cleanContent;
+                
+                taskEl.innerHTML = `
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        <div style="color: ${taskColor}; font-size: 12px; font-weight: 600; flex-shrink: 0; margin-top: 2px;">${taskType}</div>
+                        <div style="flex: 1;">
+                            <div style="color: #182026; line-height: 1.5;">${displayContent}</div>
+                            <div style="margin-top: 4px; font-size: 12px; color: #5c7080;">
+                                ${task.editTime ? new Date(task.editTime).toLocaleDateString() : 'No date'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Click to open in Roam
+                taskEl.onclick = () => {
+                    window.roamAlphaAPI.ui.mainWindow.openBlock({ block: { uid: task.uid } });
+                };
+                
+                taskEl.onmouseenter = () => {
+                    taskEl.style.background = '#f5f8fa';
+                };
+                
+                taskEl.onmouseleave = () => {
+                    taskEl.style.background = 'transparent';
+                };
+                
+                tasksContainer.appendChild(taskEl);
+            });
+            
+            pageSection.appendChild(pageHeader);
+            pageSection.appendChild(tasksContainer);
+            resultsContainer.appendChild(pageSection);
+            
+            // Toggle page section
+            let isCollapsed = false;
+            pageHeader.onclick = () => {
+                isCollapsed = !isCollapsed;
+                tasksContainer.style.display = isCollapsed ? 'none' : 'block';
+                pageHeader.style.background = isCollapsed ? '#e1e8ed' : '#f5f8fa';
+            };
+        });
+    };
+    
+    // Highlight search term
+    const highlightSearchTerm = (text, query) => {
+        if (!query) return text;
+        
+        // Simple highlight for exact matches
+        const regex = new RegExp(`(${query})`, 'gi');
+        return text.replace(regex, '<mark style="background: #ffd700; padding: 0 2px;">$1</mark>');
+    };
+    
+    // Search input handler
+    searchInput.oninput = (e) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            performSearch();
+        }, 300);
+    };
+    
+    // Initialize
+    loadAllTasks();
 }
 
 // Create the analytics popup
@@ -1884,6 +2270,7 @@ function displayAnalytics(content, analytics) {
         { id: "overview", label: "Overview", icon: "📊" },
         { id: "charts", label: "Charts", icon: "📈" },
         { id: "logbook", label: "Logbook", icon: "📖" },
+        { id: "search", label: "Search", icon: "🔍" },
         { id: "achievement", label: "Achievement", icon: "🏆" },
         { id: "handbook", label: "Handbook", icon: "📚" }
     ];
@@ -1930,6 +2317,7 @@ function displayAnalytics(content, analytics) {
     createOverviewPanel(tabPanels, panelsContainer, analytics);
     createChartsPanel(tabPanels, panelsContainer, analytics);
     createLogbookPanel(tabPanels, panelsContainer, analytics);
+    createSearchPanel(tabPanels, panelsContainer);
     createAchievementPanel(tabPanels, panelsContainer, analytics);
     createHandbookPanel(tabPanels, panelsContainer);
 }
@@ -2035,6 +2423,17 @@ function createLogbookPanel(tabPanels, container, analytics) {
     tabPanels.logbook = panel;
     
     createLogbookView(panel, analytics);
+    
+    container.appendChild(panel);
+}
+
+function createSearchPanel(tabPanels, container) {
+    const panel = document.createElement("div");
+    panel.className = "bp3-tab-panel";
+    panel.style.display = "none";
+    tabPanels.search = panel;
+    
+    createSearchView(panel);
     
     container.appendChild(panel);
 }

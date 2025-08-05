@@ -43,3 +43,59 @@ export function getScoreEmoji(score) {
     if (score >= 50) return "📈";
     return "💪";
 }
+
+// Simple fuzzy search implementation
+export function fuzzySearch(query, text) {
+    if (!query || !text) return false;
+    
+    query = query.toLowerCase();
+    text = text.toLowerCase();
+    
+    // Exact match
+    if (text.includes(query)) return true;
+    
+    // Fuzzy match - all characters in query must appear in text in order
+    let queryIndex = 0;
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+        if (text[i] === query[queryIndex]) {
+            queryIndex++;
+        }
+    }
+    
+    return queryIndex === query.length;
+}
+
+// Calculate fuzzy search score
+export function fuzzySearchScore(query, text) {
+    if (!query || !text) return 0;
+    
+    query = query.toLowerCase();
+    text = text.toLowerCase();
+    
+    // Exact match gets highest score
+    if (text === query) return 1000;
+    
+    // Contains exact query
+    if (text.includes(query)) return 500;
+    
+    // Fuzzy match scoring
+    let score = 0;
+    let queryIndex = 0;
+    let consecutiveMatches = 0;
+    
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+        if (text[i] === query[queryIndex]) {
+            score += 10;
+            consecutiveMatches++;
+            if (consecutiveMatches > 1) {
+                score += consecutiveMatches * 5; // Bonus for consecutive matches
+            }
+            queryIndex++;
+        } else {
+            consecutiveMatches = 0;
+        }
+    }
+    
+    // Only return score if all characters were found
+    return queryIndex === query.length ? score : 0;
+}
