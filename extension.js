@@ -91,6 +91,45 @@ async function getTotalTodos() {
         return 0;
     }
 }
+
+// Get archived blocks
+async function getArchivedBlocks() {
+    try {
+        console.log("Fetching ARCHIVED blocks...");
+        
+        const query = `
+            [:find ?uid ?string ?create-time ?edit-time ?page-title
+             :where
+             [?b :block/uid ?uid]
+             [?b :block/string ?string]
+             [(clojure.string/includes? ?string "{{[[ARCHIVED]]}}")]
+             [?b :block/page ?page]
+             [?page :node/title ?page-title]
+             (or-join [?b ?create-time]
+               (and [?b :create/time ?create-time])
+               (and [(missing? $ ?b :create/time)]
+                    [(ground 0) ?create-time]))
+             (or-join [?b ?edit-time]
+               (and [?b :edit/time ?edit-time])
+               (and [(missing? $ ?b :edit/time)]
+                    [(ground 0) ?edit-time]))]
+        `;
+        
+        const results = await window.roamAlphaAPI.q(query);
+        console.log(`Found ${results.length} ARCHIVED blocks`);
+        
+        return results.map(([uid, content, createTime, editTime, pageTitle]) => ({
+            uid,
+            content,
+            createTime: createTime || null,
+            editTime: editTime || null,
+            pageTitle: pageTitle || "Untitled"
+        }));
+    } catch (error) {
+        console.error("Error fetching ARCHIVED blocks:", error);
+        return [];
+    }
+}
 // ========== utils module ==========
 // Utility functions for text processing and date calculations
 
@@ -668,8 +707,8 @@ function createHeatmapCalendar(dailyCounts) {
     const startDate = new Date();
     startDate.setDate(today.getDate() - 364); // Show last year
     
-    // Calculate start to align with Sunday
-    while (startDate.getDay() !== 0) {
+    // Calculate start to align with Monday
+    while (startDate.getDay() !== 1) {
         startDate.setDate(startDate.getDate() - 1);
     }
     
@@ -695,7 +734,7 @@ function createHeatmapCalendar(dailyCounts) {
     // Day labels
     const dayLabels = document.createElement("div");
     dayLabels.style.cssText = "display: flex; flex-direction: column; gap: 3px; margin-right: 8px; font-size: 10px; color: #5c7080; width: 32px;";
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     days.forEach(day => {
         const label = document.createElement("div");
         label.style.cssText = "height: 12px; display: flex; align-items: center; justify-content: flex-end; padding-right: 4px;";
@@ -959,9 +998,11 @@ function createLast12WeeksTrend(dailyCounts) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Get start of current week (Sunday)
+    // Get start of current week (Monday)
     const currentWeekStart = new Date(today);
-    currentWeekStart.setDate(today.getDate() - today.getDay());
+    const dayOfWeek = today.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday (0), go back 6 days, otherwise go back (dayOfWeek - 1) days
+    currentWeekStart.setDate(today.getDate() - daysToMonday);
     
     // Calculate data for last 12 weeks
     const weeks = [];
@@ -1165,9 +1206,32 @@ const POPUP_ID = "todo-analysis-popup";
 
 // Create logbook view
 function createLogbookView(container, analytics) {
-    // Date selector
-    const selectorContainer = document.createElement("div");
-    selectorContainer.style.cssText = "margin-bottom: 16px; display: flex; align-items: center; gap: 12px;";
+    // Header with controls
+    const headerContainer = document.createElement("div");
+    headerContainer.style.cssText = "margin-bottom: 20px;";
+    
+    // Task type toggle
+    const toggleContainer = document.createElement("div");
+    toggleContainer.style.cssText = "display: flex; gap: 8px; margin-bottom: 12px;";
+    
+    const completedToggle = document.createElement("button");
+    completedToggle.className = "bp3-button bp3-intent-primary";
+    completedToggle.innerHTML = '<span style="margin-right: 4px;">✅</span> Completed';
+    
+    const archivedToggle = document.createElement("button");
+    archivedToggle.className = "bp3-button";
+    archivedToggle.innerHTML = '<span style="margin-right: 4px;">🗑️</span> Archived';
+    
+    toggleContainer.appendChild(completedToggle);
+    toggleContainer.appendChild(archivedToggle);
+    
+    // Date navigation row
+    const dateNavContainer = document.createElement("div");
+    dateNavContainer.style.cssText = "display: flex; align-items: center; gap: 12px; margin-bottom: 12px;";
+    
+    const prevButton = document.createElement("button");
+    prevButton.className = "bp3-button bp3-minimal bp3-icon-chevron-left";
+    prevButton.title = "Previous day";
     
     const dateInput = document.createElement("input");
     dateInput.type = "date";
@@ -1175,114 +1239,459 @@ function createLogbookView(container, analytics) {
     dateInput.value = getLocalDateString(new Date());
     dateInput.style.cssText = "width: 200px;";
     
+    const nextButton = document.createElement("button");
+    nextButton.className = "bp3-button bp3-minimal bp3-icon-chevron-right";
+    nextButton.title = "Next day";
+    
     const todayButton = document.createElement("button");
     todayButton.className = "bp3-button bp3-small";
     todayButton.textContent = "Today";
-    todayButton.onclick = () => {
-        dateInput.value = getLocalDateString(new Date());
+    
+    const weekButton = document.createElement("button");
+    weekButton.className = "bp3-button bp3-small bp3-minimal";
+    weekButton.textContent = "This Week";
+    
+    const monthButton = document.createElement("button");
+    monthButton.className = "bp3-button bp3-small bp3-minimal";
+    monthButton.textContent = "This Month";
+    
+    dateNavContainer.appendChild(prevButton);
+    dateNavContainer.appendChild(dateInput);
+    dateNavContainer.appendChild(nextButton);
+    dateNavContainer.appendChild(todayButton);
+    dateNavContainer.appendChild(weekButton);
+    dateNavContainer.appendChild(monthButton);
+    
+    // Filter and search row
+    const filterContainer = document.createElement("div");
+    filterContainer.style.cssText = "display: flex; gap: 12px; align-items: center;";
+    
+    const searchInput = document.createElement("input");
+    searchInput.className = "bp3-input";
+    searchInput.placeholder = "Search tasks...";
+    searchInput.style.cssText = "flex: 1;";
+    
+    const pageFilter = document.createElement("select");
+    pageFilter.className = "bp3-select";
+    pageFilter.style.cssText = "width: 200px;";
+    
+    const sortSelect = document.createElement("select");
+    sortSelect.className = "bp3-select";
+    sortSelect.style.cssText = "width: 150px;";
+    sortSelect.innerHTML = `
+        <option value="time-desc">Time (newest first)</option>
+        <option value="time-asc">Time (oldest first)</option>
+        <option value="page">Page name</option>
+        <option value="content">Task content</option>
+    `;
+    
+    const exportButton = document.createElement("button");
+    exportButton.className = "bp3-button bp3-minimal bp3-icon-export";
+    exportButton.title = "Export tasks";
+    
+    filterContainer.appendChild(searchInput);
+    filterContainer.appendChild(pageFilter);
+    filterContainer.appendChild(sortSelect);
+    filterContainer.appendChild(exportButton);
+    
+    headerContainer.appendChild(toggleContainer);
+    headerContainer.appendChild(dateNavContainer);
+    headerContainer.appendChild(filterContainer);
+    container.appendChild(headerContainer);
+    
+    // Stats bar
+    const statsBar = document.createElement("div");
+    statsBar.style.cssText = "display: flex; gap: 20px; margin-bottom: 16px; padding: 12px; background: #f5f8fa; border-radius: 6px; border: 1px solid #e1e8ed;";
+    container.appendChild(statsBar);
+    
+    // Tasks container with sections
+    const tasksWrapper = document.createElement("div");
+    tasksWrapper.style.cssText = "border: 1px solid #e1e8ed; border-radius: 6px; background: white; overflow: hidden;";
+    
+    const tasksContainer = document.createElement("div");
+    tasksContainer.style.cssText = "max-height: 600px; overflow-y: auto; padding: 16px;";
+    tasksWrapper.appendChild(tasksContainer);
+    
+    container.appendChild(tasksWrapper);
+    
+    // State management
+    let currentView = 'day'; // day, week, month
+    let searchTerm = '';
+    let selectedPage = 'all';
+    let sortBy = 'time-desc';
+    let taskType = 'completed'; // completed or archived
+    let archivedBlocks = [];
+    
+    // Helper functions
+    const navigateDate = (direction) => {
+        const current = new Date(dateInput.value);
+        current.setDate(current.getDate() + direction);
+        dateInput.value = getLocalDateString(current);
         updateLogbook();
     };
     
-    selectorContainer.appendChild(dateInput);
-    selectorContainer.appendChild(todayButton);
-    container.appendChild(selectorContainer);
-    
-    // Tasks list container
-    const tasksContainer = document.createElement("div");
-    tasksContainer.style.cssText = "max-height: 400px; overflow-y: auto; border: 1px solid #e1e8ed; border-radius: 4px; padding: 16px; background: #f5f8fa;";
-    container.appendChild(tasksContainer);
-    
-    // Update function
-    const updateLogbook = () => {
-        const selectedDate = dateInput.value;
-        console.log("Updating logbook for date:", selectedDate);
+    const getDateRange = () => {
+        const selected = new Date(dateInput.value);
+        let startDate, endDate;
         
-        const tasksForDay = analytics.blocks.filter(block => {
+        switch (currentView) {
+            case 'week':
+                startDate = new Date(selected);
+                const dayOfWeek = selected.getDay();
+                const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday (0), go back 6 days, otherwise go back (dayOfWeek - 1) days
+                startDate.setDate(selected.getDate() - daysToMonday);
+                endDate = new Date(startDate);
+                endDate.setDate(startDate.getDate() + 6);
+                break;
+            case 'month':
+                startDate = new Date(selected.getFullYear(), selected.getMonth(), 1);
+                endDate = new Date(selected.getFullYear(), selected.getMonth() + 1, 0);
+                break;
+            default: // day
+                startDate = endDate = selected;
+        }
+        
+        return { startDate, endDate };
+    };
+    
+    const populatePageFilter = () => {
+        const sourceBlocks = taskType === 'completed' ? analytics.blocks : archivedBlocks;
+        const pages = [...new Set(sourceBlocks.map(b => b.pageTitle))].sort();
+        pageFilter.innerHTML = '<option value="all">All pages</option>';
+        pages.forEach(page => {
+            const option = document.createElement("option");
+            option.value = page;
+            option.textContent = page;
+            pageFilter.appendChild(option);
+        });
+    };
+    
+    const exportTasks = (tasks) => {
+        const data = tasks.map(task => ({
+            time: new Date(task.editTime).toLocaleString(),
+            content: task.content.replace(/\{\{\[\[DONE\]\]\}\}|\{\{\[\[TODO\]\]\}\}|\{\{DONE\}\}|\{\{TODO\}\}|\{\{\[\[ARCHIVED\]\]\}\}/g, '').trim(),
+            page: task.pageTitle
+        }));
+        
+        const csv = [
+            'Time,Task,Page',
+            ...data.map(row => `"${row.time}","${row.content.replace(/"/g, '""')}","${row.page}"`)
+        ].join('\n');
+        
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tasks-${dateInput.value}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+    
+    const updateLogbook = () => {
+        const { startDate, endDate } = getDateRange();
+        
+        // Use appropriate data based on task type
+        const sourceBlocks = taskType === 'completed' ? analytics.blocks : archivedBlocks;
+        
+        // Filter tasks by date range
+        let filteredTasks = sourceBlocks.filter(block => {
             if (!block.editTime) return false;
-            const taskDate = getLocalDateString(new Date(block.editTime));
-            return taskDate === selectedDate;
+            const taskDate = new Date(block.editTime);
+            taskDate.setHours(0, 0, 0, 0);
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            return taskDate >= start && taskDate <= end;
         });
         
-        console.log("Tasks found for", selectedDate, ":", tasksForDay.length);
+        // Apply filters
+        if (searchTerm) {
+            filteredTasks = filteredTasks.filter(task => 
+                task.content.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+        }
         
-        // Sort by time
-        tasksForDay.sort((a, b) => (b.editTime || 0) - (a.editTime || 0));
+        if (selectedPage !== 'all') {
+            filteredTasks = filteredTasks.filter(task => task.pageTitle === selectedPage);
+        }
         
+        // Sort tasks
+        switch (sortBy) {
+            case 'time-asc':
+                filteredTasks.sort((a, b) => (a.editTime || 0) - (b.editTime || 0));
+                break;
+            case 'page':
+                filteredTasks.sort((a, b) => a.pageTitle.localeCompare(b.pageTitle));
+                break;
+            case 'content':
+                filteredTasks.sort((a, b) => a.content.localeCompare(b.content));
+                break;
+            default: // time-desc
+                filteredTasks.sort((a, b) => (b.editTime || 0) - (a.editTime || 0));
+        }
+        
+        // Update stats bar
+        const timeSpent = filteredTasks.length * 2; // Estimate 2 min per task
+        const productivity = filteredTasks.length > 0 ? 
+            Math.round((filteredTasks.length / (currentView === 'day' ? 10 : currentView === 'week' ? 50 : 200)) * 100) : 0;
+        
+        statsBar.innerHTML = `
+            <div>
+                <div style="font-size: 24px; font-weight: bold; color: #0f9960;">${filteredTasks.length}</div>
+                <div style="font-size: 12px; color: #5c7080;">Tasks completed</div>
+            </div>
+            <div>
+                <div style="font-size: 24px; font-weight: bold; color: #106ba3;">${Math.floor(timeSpent / 60)}h ${timeSpent % 60}m</div>
+                <div style="font-size: 12px; color: #5c7080;">Est. time spent</div>
+            </div>
+            <div>
+                <div style="font-size: 24px; font-weight: bold; color: #d9822b;">${productivity}%</div>
+                <div style="font-size: 12px; color: #5c7080;">Productivity level</div>
+            </div>
+            ${currentView === 'day' ? `
+                <div>
+                    <div style="font-size: 24px; font-weight: bold; color: #5c7080;">${filteredTasks.length > 0 ? 
+                        new Date(Math.min(...filteredTasks.map(t => t.editTime))).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 
+                        '-'}</div>
+                    <div style="font-size: 12px; color: #5c7080;">First task</div>
+                </div>
+            ` : ''}
+        `;
+        
+        // Clear container
         tasksContainer.innerHTML = "";
         
-        if (tasksForDay.length === 0) {
+        if (filteredTasks.length === 0) {
             tasksContainer.innerHTML = `
-                <div style="text-align: center; color: #5c7080; padding: 40px;">
-                    <div style="font-size: 24px; margin-bottom: 8px;">📅</div>
-                    <div>No tasks completed on this day</div>
+                <div style="text-align: center; color: #5c7080; padding: 60px 20px;">
+                    <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.5;">
+                        ${searchTerm || selectedPage !== 'all' ? '🔍' : '📅'}
+                    </div>
+                    <div style="font-size: 16px; margin-bottom: 8px;">
+                        ${searchTerm || selectedPage !== 'all' ? 'No matching tasks found' : 
+                          taskType === 'completed' ? 'No tasks completed' : 'No archived tasks'}
+                    </div>
+                    <div style="font-size: 14px;">
+                        ${currentView === 'day' ? 'on ' + new Date(dateInput.value).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) :
+                          currentView === 'week' ? 'this week' : 'this month'}
+                    </div>
                 </div>
             `;
             return;
         }
         
-        // Display count
-        const countDiv = document.createElement("div");
-        countDiv.style.cssText = "margin-bottom: 16px; font-weight: 500; color: #182026;";
-        countDiv.textContent = `${tasksForDay.length} tasks completed`;
-        tasksContainer.appendChild(countDiv);
+        // Group tasks by time period
+        const groups = {};
+        filteredTasks.forEach(task => {
+            const date = new Date(task.editTime);
+            let groupKey;
+            
+            if (currentView === 'day') {
+                groupKey = date.getHours();
+            } else {
+                groupKey = getLocalDateString(date);
+            }
+            
+            if (!groups[groupKey]) groups[groupKey] = [];
+            groups[groupKey].push(task);
+        });
         
-        // Display tasks
-        tasksForDay.forEach(task => {
-            const taskEl = document.createElement("div");
-            taskEl.style.cssText = "margin-bottom: 12px; padding: 12px; background: white; border-radius: 4px; border: 1px solid #e1e8ed; cursor: pointer; transition: all 0.2s;";
+        // Display grouped tasks
+        Object.entries(groups).forEach(([groupKey, tasks]) => {
+            // Group header
+            const groupHeader = document.createElement("div");
+            groupHeader.style.cssText = "margin: 20px 0 12px 0; padding-bottom: 8px; border-bottom: 1px solid #e1e8ed; display: flex; justify-content: space-between; align-items: center;";
             
-            // Time
-            const time = new Date(task.editTime).toLocaleTimeString('en-US', { 
-                hour: 'numeric', 
-                minute: '2-digit',
-                hour12: true 
-            });
+            let headerText;
+            if (currentView === 'day') {
+                const hour = parseInt(groupKey);
+                headerText = `${hour === 0 ? '12' : hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+            } else {
+                headerText = new Date(groupKey).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            }
             
-            // Clean content (remove {{[[DONE]]}}) and other todo markers
-            const cleanContent = task.content
-                .replace(/\{\{\[\[DONE\]\]\}\}/g, '')
-                .replace(/\{\{\[\[TODO\]\]\}\}/g, '')
-                .replace(/\{\{DONE\}\}/g, '')
-                .replace(/\{\{TODO\}\}/g, '')
-                .trim();
-            
-            taskEl.innerHTML = `
-                <div style="display: flex; gap: 12px; align-items: flex-start;">
-                    <div style="color: #0f9960; font-size: 18px; flex-shrink: 0;">✓</div>
-                    <div style="flex: 1;">
-                        <div style="color: #182026; margin-bottom: 4px;">${cleanContent}</div>
-                        <div style="font-size: 12px; color: #5c7080; display: flex; gap: 12px;">
-                            <span>${time}</span>
-                            <span>${task.pageTitle}</span>
-                        </div>
-                    </div>
-                </div>
+            groupHeader.innerHTML = `
+                <span style="font-weight: 600; color: #182026;">${headerText}</span>
+                <span style="font-size: 14px; color: #5c7080;">${tasks.length} task${tasks.length > 1 ? 's' : ''}</span>
             `;
+            tasksContainer.appendChild(groupHeader);
             
-            // Click to open block
-            taskEl.onclick = () => {
-                window.roamAlphaAPI.ui.mainWindow.openBlock({ block: { uid: task.uid } });
-            };
-            
-            taskEl.onmouseenter = () => {
-                taskEl.style.transform = "translateX(4px)";
-                taskEl.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)";
-            };
-            
-            taskEl.onmouseleave = () => {
-                taskEl.style.transform = "translateX(0)";
-                taskEl.style.boxShadow = "none";
-            };
-            
-            tasksContainer.appendChild(taskEl);
+            // Tasks in group
+            tasks.forEach(task => {
+                const taskEl = document.createElement("div");
+                taskEl.style.cssText = "margin-bottom: 12px; padding: 12px 16px; background: #f5f8fa; border-radius: 6px; border: 1px solid #e1e8ed; cursor: pointer; transition: all 0.2s; position: relative;";
+                
+                const time = new Date(task.editTime).toLocaleTimeString('en-US', { 
+                    hour: 'numeric', 
+                    minute: '2-digit',
+                    hour12: true 
+                });
+                
+                const cleanContent = task.content
+                    .replace(/\{\{\[\[DONE\]\]\}\}|\{\{\[\[TODO\]\]\}\}|\{\{DONE\}\}|\{\{TODO\}\}|\{\{\[\[ARCHIVED\]\]\}\}/g, '')
+                    .trim();
+                
+                // Highlight search term
+                const displayContent = searchTerm ? 
+                    cleanContent.replace(new RegExp(`(${searchTerm})`, 'gi'), '<mark style="background: #ffd700; padding: 0 2px;">$1</mark>') : 
+                    cleanContent;
+                
+                const taskIcon = taskType === 'completed' ? 
+                    '<div style="color: #0f9960; font-size: 18px; flex-shrink: 0; margin-top: 2px;">✓</div>' :
+                    '<div style="color: #5c7080; font-size: 18px; flex-shrink: 0; margin-top: 2px;">🗑️</div>';
+                
+                taskEl.innerHTML = `
+                    <div style="display: flex; gap: 12px; align-items: flex-start;">
+                        ${taskIcon}
+                        <div style="flex: 1;">
+                            <div style="color: #182026; margin-bottom: 6px; line-height: 1.4;">${displayContent}</div>
+                            <div style="font-size: 12px; color: #5c7080; display: flex; gap: 16px; align-items: center;">
+                                <span style="display: flex; align-items: center; gap: 4px;">
+                                    <span style="opacity: 0.7;">⏰</span> ${time}
+                                </span>
+                                <span style="display: flex; align-items: center; gap: 4px;">
+                                    <span style="opacity: 0.7;">📄</span> ${task.pageTitle}
+                                </span>
+                            </div>
+                        </div>
+                        <button class="bp3-button bp3-minimal bp3-small bp3-icon-link" title="Open in Roam" style="opacity: 0; transition: opacity 0.2s;"></button>
+                    </div>
+                `;
+                
+                const linkButton = taskEl.querySelector('button');
+                linkButton.onclick = (e) => {
+                    e.stopPropagation();
+                    window.roamAlphaAPI.ui.mainWindow.openBlock({ block: { uid: task.uid } });
+                };
+                
+                taskEl.onclick = () => {
+                    window.roamAlphaAPI.ui.mainWindow.openBlock({ block: { uid: task.uid } });
+                };
+                
+                taskEl.onmouseenter = () => {
+                    taskEl.style.transform = "translateX(4px)";
+                    taskEl.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)";
+                    taskEl.style.background = "white";
+                    linkButton.style.opacity = "1";
+                };
+                
+                taskEl.onmouseleave = () => {
+                    taskEl.style.transform = "translateX(0)";
+                    taskEl.style.boxShadow = "none";
+                    taskEl.style.background = "#f5f8fa";
+                    linkButton.style.opacity = "0";
+                };
+                
+                tasksContainer.appendChild(taskEl);
+            });
         });
     };
     
-    // Initial load
-    updateLogbook();
+    // Event handlers
+    prevButton.onclick = () => navigateDate(-1);
+    nextButton.onclick = () => navigateDate(1);
     
-    // Update on date change
+    todayButton.onclick = () => {
+        currentView = 'day';
+        dateInput.value = getLocalDateString(new Date());
+        updateViewButtons();
+        updateLogbook();
+    };
+    
+    weekButton.onclick = () => {
+        currentView = 'week';
+        updateViewButtons();
+        updateLogbook();
+    };
+    
+    monthButton.onclick = () => {
+        currentView = 'month';
+        updateViewButtons();
+        updateLogbook();
+    };
+    
+    const updateViewButtons = () => {
+        [todayButton, weekButton, monthButton].forEach(btn => btn.classList.remove('bp3-intent-primary'));
+        if (currentView === 'day') todayButton.classList.add('bp3-intent-primary');
+        else if (currentView === 'week') weekButton.classList.add('bp3-intent-primary');
+        else monthButton.classList.add('bp3-intent-primary');
+    };
+    
+    searchInput.oninput = (e) => {
+        searchTerm = e.target.value;
+        updateLogbook();
+    };
+    
+    pageFilter.onchange = (e) => {
+        selectedPage = e.target.value;
+        updateLogbook();
+    };
+    
+    sortSelect.onchange = (e) => {
+        sortBy = e.target.value;
+        updateLogbook();
+    };
+    
+    exportButton.onclick = () => {
+        const { startDate, endDate } = getDateRange();
+        const tasks = analytics.blocks.filter(block => {
+            if (!block.editTime) return false;
+            const taskDate = new Date(block.editTime);
+            return taskDate >= startDate && taskDate <= endDate;
+        });
+        exportTasks(tasks);
+    };
+    
     dateInput.onchange = updateLogbook;
+    
+    // Toggle button handlers
+    completedToggle.onclick = async () => {
+        if (taskType !== 'completed') {
+            taskType = 'completed';
+            completedToggle.classList.add('bp3-intent-primary');
+            archivedToggle.classList.remove('bp3-intent-primary');
+            populatePageFilter();
+            updateLogbook();
+        }
+    };
+    
+    archivedToggle.onclick = async () => {
+        if (taskType !== 'archived') {
+            taskType = 'archived';
+            archivedToggle.classList.add('bp3-intent-primary');
+            completedToggle.classList.remove('bp3-intent-primary');
+            
+            // Fetch archived blocks if not already loaded
+            if (archivedBlocks.length === 0) {
+                // Show loading state
+                tasksContainer.innerHTML = `
+                    <div style="text-align: center; padding: 40px;">
+                        <div class="bp3-spinner">
+                            <div class="bp3-spinner-animation"></div>
+                        </div>
+                        <div style="margin-top: 16px; color: #5c7080;">Loading archived tasks...</div>
+                    </div>
+                `;
+                
+                try {
+                    const { getArchivedBlocks } = await import('./queries.js');
+                    archivedBlocks = await getArchivedBlocks();
+                } catch (error) {
+                    console.error("Error fetching archived blocks:", error);
+                    archivedBlocks = [];
+                }
+            }
+            
+            populatePageFilter();
+            updateLogbook();
+        }
+    };
+    
+    // Initialize
+    populatePageFilter();
+    updateViewButtons();
+    updateLogbook();
 }
 
 // Create the analytics popup
@@ -1590,8 +1999,18 @@ function createChartsPanel(tabPanels, container, analytics) {
     chartsGrid.appendChild(hourChart);
     
     // Weekday distribution
-    const weekdayData = Object.values(analytics.weekdayDistribution);
-    const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    // Reorder data to start from Monday
+    const weekdayDataOriginal = analytics.weekdayDistribution;
+    const weekdayData = [
+        weekdayDataOriginal[1], // Mon
+        weekdayDataOriginal[2], // Tue
+        weekdayDataOriginal[3], // Wed
+        weekdayDataOriginal[4], // Thu
+        weekdayDataOriginal[5], // Fri
+        weekdayDataOriginal[6], // Sat
+        weekdayDataOriginal[0]  // Sun
+    ];
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const weekdayChart = createBarChart(weekdayData, weekdayLabels, "Tasks by Day of Week", "#0f9960");
     chartsGrid.appendChild(weekdayChart);
     
@@ -1647,37 +2066,199 @@ function createHandbookPanel(tabPanels, container) {
     tabPanels.handbook = panel;
     
     panel.innerHTML = `
-        <div style="padding: 20px; background: #f5f8fa; border-radius: 8px;">
-            <h3 style="margin: 0 0 16px 0; color: #182026;">How to Use Todo Analysis</h3>
+        <div style="padding: 20px; max-width: 800px; margin: 0 auto;">
+            <h2 style="margin: 0 0 24px 0; color: #182026; text-align: center;">📚 Todo Analysis Handbook</h2>
             
-            <div style="margin-bottom: 20px;">
-                <h4 style="color: #182026; margin-bottom: 8px;">📊 Overview Tab</h4>
-                <p style="color: #5c7080; margin: 0 0 8px 0;">View your productivity score, key metrics, and recent trends at a glance.</p>
+            <!-- Introduction Section -->
+            <div style="background: #f5f8fa; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #e1e8ed;">
+                <h3 style="margin: 0 0 12px 0; color: #182026;">🎯 Introduction</h3>
+                <p style="color: #5c7080; margin: 0 0 12px 0; line-height: 1.6;">
+                    Todo Analysis is a powerful extension for Roam Research that helps you track, analyze, and optimize your task completion habits. 
+                    By providing detailed insights into your productivity patterns, it empowers you to make data-driven decisions about your workflow.
+                </p>
+                <p style="color: #5c7080; margin: 0; line-height: 1.6;">
+                    Whether you're looking to build better habits, understand your work patterns, or simply stay motivated with gamification features,
+                    Todo Analysis provides the tools and insights you need to succeed.
+                </p>
             </div>
             
-            <div style="margin-bottom: 20px;">
-                <h4 style="color: #182026; margin-bottom: 8px;">📈 Charts Tab</h4>
-                <p style="color: #5c7080; margin: 0 0 8px 0;">Analyze your task completion patterns by hour, day of week, and view your activity heatmap.</p>
+            <!-- Quick Start Guide -->
+            <div style="background: #e7f3ff; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #106ba3;">
+                <h3 style="margin: 0 0 12px 0; color: #182026;">🚀 Quick Start Guide</h3>
+                <ol style="color: #5c7080; margin: 0; padding-left: 20px; line-height: 1.8;">
+                    <li><strong>Mark tasks as TODO:</strong> Use {{[[TODO]]}} or {{TODO}} in your blocks</li>
+                    <li><strong>Complete tasks:</strong> Change {{[[TODO]]}} to {{[[DONE]]}} when finished</li>
+                    <li><strong>Open Todo Analysis:</strong> Click the chart icon in the top bar</li>
+                    <li><strong>Review your stats:</strong> Explore the different tabs for insights</li>
+                    <li><strong>Build habits:</strong> Check daily to maintain your streak!</li>
+                </ol>
             </div>
             
-            <div style="margin-bottom: 20px;">
-                <h4 style="color: #182026; margin-bottom: 8px;">📖 Logbook Tab</h4>
-                <p style="color: #5c7080; margin: 0 0 8px 0;">Review tasks completed on specific days. Click on any task to open it in Roam.</p>
+            <!-- Tab Descriptions -->
+            <div style="margin-bottom: 24px;">
+                <h3 style="margin: 0 0 16px 0; color: #182026;">📋 Understanding Each Tab</h3>
+                
+                <div style="margin-bottom: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid #e1e8ed;">
+                    <h4 style="color: #182026; margin: 0 0 8px 0;">📊 Overview Tab</h4>
+                    <p style="color: #5c7080; margin: 0 0 8px 0; line-height: 1.6;">
+                        Your productivity dashboard showing key metrics at a glance:
+                    </p>
+                    <ul style="color: #5c7080; margin: 0; padding-left: 20px;">
+                        <li><strong>Productivity Score (0-100):</strong> A composite score based on streak, daily average, consistency, and momentum</li>
+                        <li><strong>Key Metrics:</strong> Total completed tasks, current streak, daily average, and total TODOs</li>
+                        <li><strong>Trend Charts:</strong> Visual representation of your task completion over the last 12 days, weeks, and months</li>
+                    </ul>
+                </div>
+                
+                <div style="margin-bottom: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid #e1e8ed;">
+                    <h4 style="color: #182026; margin: 0 0 8px 0;">📈 Charts Tab</h4>
+                    <p style="color: #5c7080; margin: 0 0 8px 0; line-height: 1.6;">
+                        Deep dive into your productivity patterns:
+                    </p>
+                    <ul style="color: #5c7080; margin: 0; padding-left: 20px;">
+                        <li><strong>Hour Distribution:</strong> Discover your most productive hours of the day</li>
+                        <li><strong>Weekday Distribution:</strong> See which days you complete the most tasks</li>
+                        <li><strong>Activity Calendar:</strong> A GitHub-style heatmap showing your daily activity over time</li>
+                    </ul>
+                </div>
+                
+                <div style="margin-bottom: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid #e1e8ed;">
+                    <h4 style="color: #182026; margin: 0 0 8px 0;">📖 Logbook Tab</h4>
+                    <p style="color: #5c7080; margin: 0 0 8px 0; line-height: 1.6;">
+                        Review your completed tasks by date:
+                    </p>
+                    <ul style="color: #5c7080; margin: 0; padding-left: 20px;">
+                        <li>Navigate to any date using the date picker</li>
+                        <li>View all tasks completed on that day with timestamps</li>
+                        <li>Click any task to open it directly in Roam</li>
+                        <li>See which pages your tasks belonged to</li>
+                    </ul>
+                </div>
+                
+                <div style="margin-bottom: 20px; padding: 16px; background: white; border-radius: 8px; border: 1px solid #e1e8ed;">
+                    <h4 style="color: #182026; margin: 0 0 8px 0;">🏆 Achievement Tab</h4>
+                    <p style="color: #5c7080; margin: 0 0 8px 0; line-height: 1.6;">
+                        Gamification features to keep you motivated:
+                    </p>
+                    <ul style="color: #5c7080; margin: 0; padding-left: 20px;">
+                        <li><strong>Level System:</strong> Gain XP for each completed task and level up</li>
+                        <li><strong>Achievements:</strong> Unlock badges for reaching milestones and maintaining streaks</li>
+                        <li><strong>Categories:</strong> Achievements span multiple categories including streaks, milestones, daily goals, and more</li>
+                    </ul>
+                </div>
             </div>
             
-            <div style="margin-bottom: 20px;">
-                <h4 style="color: #182026; margin-bottom: 8px;">🏆 Achievement Tab</h4>
-                <p style="color: #5c7080; margin: 0 0 8px 0;">Track your progress with levels, XP, and unlock achievements as you complete more tasks.</p>
+            <!-- Productivity Score Breakdown -->
+            <div style="background: #f5f8fa; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #e1e8ed;">
+                <h3 style="margin: 0 0 16px 0; color: #182026;">💯 Understanding Your Productivity Score</h3>
+                <p style="color: #5c7080; margin: 0 0 12px 0; line-height: 1.6;">
+                    Your productivity score is calculated from four components, each worth up to 25 points:
+                </p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="padding: 12px; background: white; border-radius: 6px;">
+                        <h5 style="color: #d13913; margin: 0 0 4px 0;">🔥 Streak (25 points)</h5>
+                        <p style="color: #5c7080; margin: 0; font-size: 14px;">Consecutive days with completed tasks</p>
+                    </div>
+                    <div style="padding: 12px; background: white; border-radius: 6px;">
+                        <h5 style="color: #106ba3; margin: 0 0 4px 0;">📊 Daily Average (25 points)</h5>
+                        <p style="color: #5c7080; margin: 0; font-size: 14px;">Average tasks completed per day</p>
+                    </div>
+                    <div style="padding: 12px; background: white; border-radius: 6px;">
+                        <h5 style="color: #0f9960; margin: 0 0 4px 0;">📅 Consistency (25 points)</h5>
+                        <p style="color: #5c7080; margin: 0; font-size: 14px;">Days with tasks in last 30 days</p>
+                    </div>
+                    <div style="padding: 12px; background: white; border-radius: 6px;">
+                        <h5 style="color: #d9822b; margin: 0 0 4px 0;">📈 Momentum (25 points)</h5>
+                        <p style="color: #5c7080; margin: 0; font-size: 14px;">Recent 7-day average vs overall</p>
+                    </div>
+                </div>
             </div>
             
-            <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e1e8ed;">
-                <h4 style="color: #182026; margin-bottom: 8px;">Tips for Better Productivity</h4>
-                <ul style="color: #5c7080; margin: 0; padding-left: 20px;">
-                    <li>Maintain a daily streak by completing at least one task every day</li>
-                    <li>Use hashtags to categorize your tasks for better organization</li>
-                    <li>Review your hourly patterns to find your most productive times</li>
-                    <li>Set daily goals based on your average completion rate</li>
+            <!-- Advanced Tips -->
+            <div style="background: #e7f3ff; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #106ba3;">
+                <h3 style="margin: 0 0 16px 0; color: #182026;">💡 Advanced Tips & Strategies</h3>
+                
+                <h4 style="color: #182026; margin: 16px 0 8px 0;">🎯 Building Better Habits</h4>
+                <ul style="color: #5c7080; margin: 0 0 16px 0; padding-left: 20px; line-height: 1.8;">
+                    <li><strong>Start small:</strong> Begin with 1-3 tasks daily to build consistency</li>
+                    <li><strong>Time blocking:</strong> Schedule tasks during your peak productivity hours (check Charts tab)</li>
+                    <li><strong>Weekly reviews:</strong> Use the Logbook to review what you accomplished each week</li>
+                    <li><strong>Streak protection:</strong> Set a minimum daily task to maintain your streak</li>
                 </ul>
+                
+                <h4 style="color: #182026; margin: 16px 0 8px 0;">📊 Optimizing Your Workflow</h4>
+                <ul style="color: #5c7080; margin: 0 0 16px 0; padding-left: 20px; line-height: 1.8;">
+                    <li><strong>Pattern recognition:</strong> Identify your most productive times and days</li>
+                    <li><strong>Batch similar tasks:</strong> Group related TODOs on the same page</li>
+                    <li><strong>Use tags:</strong> Add #tags to tasks for better categorization</li>
+                    <li><strong>Daily planning:</strong> Create TODOs the night before for next day</li>
+                </ul>
+                
+                <h4 style="color: #182026; margin: 16px 0 8px 0;">🏆 Achievement Hunting</h4>
+                <ul style="color: #5c7080; margin: 0; padding-left: 20px; line-height: 1.8;">
+                    <li><strong>Check progress:</strong> Review locked achievements for goals to pursue</li>
+                    <li><strong>Milestone planning:</strong> Plan ahead for big milestones (100, 500, 1000 tasks)</li>
+                    <li><strong>Special achievements:</strong> Look for unique patterns and special dates</li>
+                    <li><strong>Category focus:</strong> Target specific achievement categories each month</li>
+                </ul>
+            </div>
+            
+            <!-- Common Questions -->
+            <div style="background: #fff3cd; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #ffeaa7;">
+                <h3 style="margin: 0 0 16px 0; color: #182026;">❓ Common Questions</h3>
+                
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #182026; margin: 0 0 4px 0;">Q: How are tasks counted?</h5>
+                    <p style="color: #5c7080; margin: 0; font-size: 14px;">
+                        Any block containing {{[[DONE]]}} or {{DONE}} is counted as a completed task. The extension tracks when TODOs are changed to DONE.
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #182026; margin: 0 0 4px 0;">Q: When does my streak reset?</h5>
+                    <p style="color: #5c7080; margin: 0; font-size: 14px;">
+                        Your streak resets if you don't complete at least one task in a calendar day (midnight to midnight in your local timezone).
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <h5 style="color: #182026; margin: 0 0 4px 0;">Q: Can I track different types of tasks?</h5>
+                    <p style="color: #5c7080; margin: 0; font-size: 14px;">
+                        Currently, all {{[[TODO]]}} → {{[[DONE]]}} transitions are tracked equally. Use tags or page organization for categorization.
+                    </p>
+                </div>
+                
+                <div>
+                    <h5 style="color: #182026; margin: 0 0 4px 0;">Q: Is my data stored anywhere?</h5>
+                    <p style="color: #5c7080; margin: 0; font-size: 14px;">
+                        No, all analysis is done locally in your browser using Roam's database. No data is sent to external servers.
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Keyboard Shortcuts -->
+            <div style="background: #f5f8fa; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #e1e8ed;">
+                <h3 style="margin: 0 0 16px 0; color: #182026;">⌨️ Keyboard Shortcuts</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div>
+                        <kbd style="background: #e1e8ed; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Esc</kbd>
+                        <span style="color: #5c7080; margin-left: 8px;">Close the popup</span>
+                    </div>
+                    <div>
+                        <kbd style="background: #e1e8ed; padding: 4px 8px; border-radius: 4px; font-family: monospace;">Tab</kbd>
+                        <span style="color: #5c7080; margin-left: 8px;">Navigate between tabs</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e1e8ed; color: #5c7080;">
+                <p style="margin: 0 0 8px 0;">
+                    <strong>Todo Analysis</strong> for Roam Research
+                </p>
+                <p style="margin: 0; font-size: 14px;">
+                    Track your progress • Build better habits • Achieve your goals
+                </p>
             </div>
         </div>
     `;

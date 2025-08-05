@@ -104,8 +104,8 @@ export function createHeatmapCalendar(dailyCounts) {
     const startDate = new Date();
     startDate.setDate(today.getDate() - 364); // Show last year
     
-    // Calculate start to align with Sunday
-    while (startDate.getDay() !== 0) {
+    // Calculate start to align with Monday
+    while (startDate.getDay() !== 1) {
         startDate.setDate(startDate.getDate() - 1);
     }
     
@@ -131,7 +131,7 @@ export function createHeatmapCalendar(dailyCounts) {
     // Day labels
     const dayLabels = document.createElement("div");
     dayLabels.style.cssText = "display: flex; flex-direction: column; gap: 3px; margin-right: 8px; font-size: 10px; color: #5c7080; width: 32px;";
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     days.forEach(day => {
         const label = document.createElement("div");
         label.style.cssText = "height: 12px; display: flex; align-items: center; justify-content: flex-end; padding-right: 4px;";
@@ -395,9 +395,11 @@ export function createLast12WeeksTrend(dailyCounts) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Get start of current week (Sunday)
+    // Get start of current week (Monday)
     const currentWeekStart = new Date(today);
-    currentWeekStart.setDate(today.getDate() - today.getDay());
+    const dayOfWeek = today.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday (0), go back 6 days, otherwise go back (dayOfWeek - 1) days
+    currentWeekStart.setDate(today.getDate() - daysToMonday);
     
     // Calculate data for last 12 weeks
     const weeks = [];

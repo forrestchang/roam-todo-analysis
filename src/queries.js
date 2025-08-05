@@ -85,3 +85,42 @@ export async function getTotalTodos() {
         return 0;
     }
 }
+
+// Get archived blocks
+export async function getArchivedBlocks() {
+    try {
+        console.log("Fetching ARCHIVED blocks...");
+        
+        const query = `
+            [:find ?uid ?string ?create-time ?edit-time ?page-title
+             :where
+             [?b :block/uid ?uid]
+             [?b :block/string ?string]
+             [(clojure.string/includes? ?string "{{[[ARCHIVED]]}}")]
+             [?b :block/page ?page]
+             [?page :node/title ?page-title]
+             (or-join [?b ?create-time]
+               (and [?b :create/time ?create-time])
+               (and [(missing? $ ?b :create/time)]
+                    [(ground 0) ?create-time]))
+             (or-join [?b ?edit-time]
+               (and [?b :edit/time ?edit-time])
+               (and [(missing? $ ?b :edit/time)]
+                    [(ground 0) ?edit-time]))]
+        `;
+        
+        const results = await window.roamAlphaAPI.q(query);
+        console.log(`Found ${results.length} ARCHIVED blocks`);
+        
+        return results.map(([uid, content, createTime, editTime, pageTitle]) => ({
+            uid,
+            content,
+            createTime: createTime || null,
+            editTime: editTime || null,
+            pageTitle: pageTitle || "Untitled"
+        }));
+    } catch (error) {
+        console.error("Error fetching ARCHIVED blocks:", error);
+        return [];
+    }
+}
