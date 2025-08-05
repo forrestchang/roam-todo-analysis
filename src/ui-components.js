@@ -3,7 +3,7 @@ import { getLocalDateString, getTotalTodos } from './queries.js';
 import { formatNumber, getScoreEmoji } from './utils.js';
 import { calculateStreakAndAverage, generateTodoAnalytics, calculateProductivityScore, calculateLevelAndXP } from './analytics.js';
 import { calculateAchievements } from './achievements.js';
-import { createLast10DaysTrend, createHeatmapCalendar, createBarChart } from './charts.js';
+import { createLast12DaysTrend, createLast12WeeksTrend, createLast12MonthsTrend, createHeatmapCalendar, createBarChart } from './charts.js';
 
 const POPUP_ID = "todo-analysis-popup";
 
@@ -387,10 +387,31 @@ function createOverviewPanel(tabPanels, container, analytics) {
     const metricsGrid = createMetricsGrid(analytics);
     panel.appendChild(metricsGrid);
     
-    // Recent trend
-    const trendChart = createLast10DaysTrend(analytics.dailyCounts);
-    panel.appendChild(trendChart);
+    // Trend charts section
+    const trendSection = document.createElement("div");
+    trendSection.style.cssText = "margin-top: 24px;";
     
+    // Section title
+    const trendTitle = document.createElement("h3");
+    trendTitle.textContent = "Task Completion Trends";
+    trendTitle.style.cssText = "margin: 0 0 20px 0; color: #182026; font-size: 18px; font-weight: 600;";
+    trendSection.appendChild(trendTitle);
+    
+    // Daily trend (12 days)
+    const dailyTrend = createLast12DaysTrend(analytics.dailyCounts);
+    trendSection.appendChild(dailyTrend);
+    
+    // Weekly trend (12 weeks)
+    const weeklyTrend = createLast12WeeksTrend(analytics.dailyCounts);
+    weeklyTrend.style.marginTop = "20px";
+    trendSection.appendChild(weeklyTrend);
+    
+    // Monthly trend (12 months)
+    const monthlyTrend = createLast12MonthsTrend(analytics.dailyCounts);
+    monthlyTrend.style.marginTop = "20px";
+    trendSection.appendChild(monthlyTrend);
+    
+    panel.appendChild(trendSection);
     container.appendChild(panel);
 }
 

@@ -561,26 +561,26 @@ function calculateAchievements(analytics) {
 // ========== charts module ==========
 // Chart components for visualization
 
-// Create last 10 days trend chart
-function createLast10DaysTrend(dailyCounts) {
-    console.log("[10-Day Trend] Input dailyCounts:", dailyCounts);
-    console.log("[10-Day Trend] Today's local date:", getLocalDateString(new Date()));
+// Create last 12 days trend chart
+function createLast12DaysTrend(dailyCounts) {
+    console.log("[12-Day Trend] Input dailyCounts:", dailyCounts);
+    console.log("[12-Day Trend] Today's local date:", getLocalDateString(new Date()));
     
     const container = document.createElement("div");
     container.className = "chart-container";
     
     const titleEl = document.createElement("h4");
-    titleEl.textContent = "Recent Task Completion Trend (Last 10 Days)";
+    titleEl.textContent = "Recent Task Completion Trend (Last 12 Days)";
     titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
     container.appendChild(titleEl);
     
-    // Get last 10 days
+    // Get last 12 days
     const dates = [];
     const counts = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    for (let i = 9; i >= 0; i--) {
+    for (let i = 11; i >= 0; i--) {
         const date = new Date(today);
         date.setDate(date.getDate() - i);
         const dateStr = getLocalDateString(date);
@@ -939,6 +939,217 @@ function createBarChart(data, labels, title, color = "#106ba3", options = {}) {
     container.appendChild(chartWrapper);
     return container;
 }
+
+// Create last 12 weeks trend chart
+function createLast12WeeksTrend(dailyCounts) {
+    const container = document.createElement("div");
+    container.className = "chart-container";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Weekly Task Completion Trend (Last 12 Weeks)";
+    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
+    container.appendChild(titleEl);
+    
+    // Calculate weekly totals
+    const weeklyData = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Get start of current week (Sunday)
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setDate(today.getDate() - today.getDay());
+    
+    // Calculate data for last 12 weeks
+    const weeks = [];
+    const counts = [];
+    
+    for (let i = 11; i >= 0; i--) {
+        const weekStart = new Date(currentWeekStart);
+        weekStart.setDate(weekStart.getDate() - (i * 7));
+        
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        
+        let weekTotal = 0;
+        const weekLabel = `${weekStart.getMonth() + 1}/${weekStart.getDate()}-${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
+        
+        // Sum up daily counts for this week
+        for (let d = new Date(weekStart); d <= weekEnd; d.setDate(d.getDate() + 1)) {
+            const dateStr = getLocalDateString(d);
+            weekTotal += dailyCounts[dateStr] || 0;
+        }
+        
+        weeks.push(weekLabel);
+        counts.push(weekTotal);
+    }
+    
+    // Create the chart
+    const chartWrapper = document.createElement("div");
+    chartWrapper.style.cssText = "display: flex; align-items: flex-end; gap: 6px; height: 150px; padding: 0 8px; background: #f5f8fa; border-radius: 4px; padding: 16px;";
+    
+    const maxCount = Math.max(...counts, 1);
+    
+    weeks.forEach((week, index) => {
+        const count = counts[index];
+        const percentage = (count / maxCount) * 100;
+        const isCurrentWeek = index === weeks.length - 1;
+        
+        const barWrapper = document.createElement("div");
+        barWrapper.style.cssText = "flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; height: 100%;";
+        
+        const barContainer = document.createElement("div");
+        barContainer.style.cssText = "flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end;";
+        
+        const bar = document.createElement("div");
+        bar.style.cssText = `
+            width: 100%;
+            height: ${percentage}%;
+            background-color: ${isCurrentWeek ? '#0f9960' : '#d9822b'};
+            border-radius: 4px 4px 0 0;
+            transition: all 0.3s;
+            cursor: pointer;
+            min-height: ${count > 0 ? '4px' : '0'};
+            position: relative;
+        `;
+        
+        // Add count label on the bar
+        if (count > 0) {
+            const countLabel = document.createElement("div");
+            countLabel.textContent = count;
+            countLabel.style.cssText = `
+                position: absolute;
+                top: -20px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 12px;
+                font-weight: 500;
+                color: #182026;
+            `;
+            bar.appendChild(countLabel);
+        }
+        
+        const labelEl = document.createElement("div");
+        labelEl.innerHTML = week.split('-').join('<br>');
+        labelEl.style.cssText = "font-size: 9px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1.2;";
+        
+        if (isCurrentWeek) {
+            labelEl.style.color = "#0f9960";
+            labelEl.style.fontWeight = "500";
+        }
+        
+        barContainer.appendChild(bar);
+        barWrapper.appendChild(barContainer);
+        barWrapper.appendChild(labelEl);
+        chartWrapper.appendChild(barWrapper);
+    });
+    
+    container.appendChild(chartWrapper);
+    return container;
+}
+
+// Create last 12 months trend chart
+function createLast12MonthsTrend(dailyCounts) {
+    const container = document.createElement("div");
+    container.className = "chart-container";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Monthly Task Completion Trend (Last 12 Months)";
+    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
+    container.appendChild(titleEl);
+    
+    // Calculate monthly totals
+    const today = new Date();
+    const months = [];
+    const counts = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    for (let i = 11; i >= 0; i--) {
+        const monthDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        const year = monthDate.getFullYear();
+        const month = monthDate.getMonth();
+        const monthLabel = `${monthNames[month]} ${year}`;
+        
+        let monthTotal = 0;
+        
+        // Get the last day of the month
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        
+        // Sum up daily counts for this month
+        for (let day = 1; day <= lastDay; day++) {
+            const date = new Date(year, month, day);
+            const dateStr = getLocalDateString(date);
+            monthTotal += dailyCounts[dateStr] || 0;
+        }
+        
+        months.push(monthLabel);
+        counts.push(monthTotal);
+    }
+    
+    // Create the chart
+    const chartWrapper = document.createElement("div");
+    chartWrapper.style.cssText = "display: flex; align-items: flex-end; gap: 6px; height: 150px; padding: 0 8px; background: #f5f8fa; border-radius: 4px; padding: 16px;";
+    
+    const maxCount = Math.max(...counts, 1);
+    
+    months.forEach((month, index) => {
+        const count = counts[index];
+        const percentage = (count / maxCount) * 100;
+        const isCurrentMonth = index === months.length - 1;
+        
+        const barWrapper = document.createElement("div");
+        barWrapper.style.cssText = "flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; height: 100%;";
+        
+        const barContainer = document.createElement("div");
+        barContainer.style.cssText = "flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end;";
+        
+        const bar = document.createElement("div");
+        bar.style.cssText = `
+            width: 100%;
+            height: ${percentage}%;
+            background-color: ${isCurrentMonth ? '#0f9960' : '#7157d9'};
+            border-radius: 4px 4px 0 0;
+            transition: all 0.3s;
+            cursor: pointer;
+            min-height: ${count > 0 ? '4px' : '0'};
+            position: relative;
+        `;
+        
+        // Add count label on the bar
+        if (count > 0) {
+            const countLabel = document.createElement("div");
+            countLabel.textContent = count;
+            countLabel.style.cssText = `
+                position: absolute;
+                top: -20px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 12px;
+                font-weight: 500;
+                color: #182026;
+            `;
+            bar.appendChild(countLabel);
+        }
+        
+        const labelEl = document.createElement("div");
+        const [monthName, year] = month.split(' ');
+        labelEl.innerHTML = `${monthName}<br>${year}`;
+        labelEl.style.cssText = "font-size: 9px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1.2;";
+        
+        if (isCurrentMonth) {
+            labelEl.style.color = "#0f9960";
+            labelEl.style.fontWeight = "500";
+        }
+        
+        barContainer.appendChild(bar);
+        barWrapper.appendChild(barContainer);
+        barWrapper.appendChild(labelEl);
+        chartWrapper.appendChild(barWrapper);
+    });
+    
+    container.appendChild(chartWrapper);
+    return container;
+}
+
 // ========== uiComponents module ==========
 // UI Components for the Todo Analysis extension
 
@@ -1328,10 +1539,31 @@ function createOverviewPanel(tabPanels, container, analytics) {
     const metricsGrid = createMetricsGrid(analytics);
     panel.appendChild(metricsGrid);
     
-    // Recent trend
-    const trendChart = createLast10DaysTrend(analytics.dailyCounts);
-    panel.appendChild(trendChart);
+    // Trend charts section
+    const trendSection = document.createElement("div");
+    trendSection.style.cssText = "margin-top: 24px;";
     
+    // Section title
+    const trendTitle = document.createElement("h3");
+    trendTitle.textContent = "Task Completion Trends";
+    trendTitle.style.cssText = "margin: 0 0 20px 0; color: #182026; font-size: 18px; font-weight: 600;";
+    trendSection.appendChild(trendTitle);
+    
+    // Daily trend (12 days)
+    const dailyTrend = createLast12DaysTrend(analytics.dailyCounts);
+    trendSection.appendChild(dailyTrend);
+    
+    // Weekly trend (12 weeks)
+    const weeklyTrend = createLast12WeeksTrend(analytics.dailyCounts);
+    weeklyTrend.style.marginTop = "20px";
+    trendSection.appendChild(weeklyTrend);
+    
+    // Monthly trend (12 months)
+    const monthlyTrend = createLast12MonthsTrend(analytics.dailyCounts);
+    monthlyTrend.style.marginTop = "20px";
+    trendSection.appendChild(monthlyTrend);
+    
+    panel.appendChild(trendSection);
     container.appendChild(panel);
 }
 
