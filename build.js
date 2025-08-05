@@ -31,6 +31,7 @@ Object.entries(modules).forEach(([name, code]) => {
     // Remove export keywords but keep the functions/constants
     processedCode = processedCode.replace(/^export\s+(function|const|let|var)\s+/gm, '$1 ');
     processedCode = processedCode.replace(/^export\s+\{[^}]+\};?\s*$/gm, '');
+    processedCode = processedCode.replace(/^export\s+default\s+/gm, '');
     
     bundledCode += `\n// ========== ${name} module ==========\n`;
     bundledCode += processedCode;
@@ -90,7 +91,7 @@ export default {
 `;
 
 // Write the bundled file
-fs.writeFileSync(path.join(__dirname, 'extension-bundled.js'), bundledCode);
+fs.writeFileSync(path.join(__dirname, 'extension.js'), bundledCode);
 
-console.log('✅ Successfully bundled extension modules into extension-bundled.js');
-console.log('📦 The bundled file can be used as a drop-in replacement for the original extension.js');
+console.log('✅ Successfully bundled extension modules into extension.js');
+console.log('📦 The extension.js file has been updated with the bundled code');

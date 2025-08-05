@@ -1,4 +1,10 @@
-const POPUP_ID = "todo-analysis-popup";
+// Todo Analysis Extension - Bundled version
+// This extension provides comprehensive analytics for TODO items in Roam Research
+// Generated from modular source files
+
+
+// ========== queries module ==========
+// Query functions for fetching TODO blocks from Roam
 
 // Get local date string (YYYY-MM-DD) in local timezone
 function getLocalDateString(date) {
@@ -61,6 +67,33 @@ async function getTodoBlocks(status) {
     }
 }
 
+// Get total TODO count (including all states)
+async function getTotalTodos() {
+    try {
+        console.log("Fetching total TODO count...");
+        
+        const query = `
+            [:find (count ?b)
+             :where
+             [?b :block/string ?string]
+             (or [(clojure.string/includes? ?string "{{[[TODO]]}}")]
+                 [(clojure.string/includes? ?string "{{[[DOING]]}}")]
+                 [(clojure.string/includes? ?string "{{[[DONE]]}}")])
+            ]
+        `;
+        
+        const result = await window.roamAlphaAPI.q(query);
+        const count = result[0]?.[0] || 0;
+        console.log(`Total TODO count: ${count}`);
+        return count;
+    } catch (error) {
+        console.error("Error fetching total TODO count:", error);
+        return 0;
+    }
+}
+// ========== utils module ==========
+// Utility functions for text processing and date calculations
+
 // Extract hashtags from text
 function extractHashtags(text) {
     return (text.match(/#(\w+)/g) || []).map(tag => tag.substring(1));
@@ -89,6 +122,24 @@ function getWeekNumber(date) {
     return `${d.getUTCFullYear()}-W${weekNo.toString().padStart(2, '0')}`;
 }
 
+// Format number with commas
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+// Generate emoji based on score
+function getScoreEmoji(score) {
+    if (score >= 90) return "🌟";
+    if (score >= 80) return "⭐";
+    if (score >= 70) return "✨";
+    if (score >= 60) return "👍";
+    if (score >= 50) return "📈";
+    return "💪";
+}
+// ========== analytics module ==========
+// Analytics calculations for TODO tasks
+
+
 // Calculate streak and daily average
 function calculateStreakAndAverage(blocks) {
     const dailyCounts = {};
@@ -98,18 +149,15 @@ function calculateStreakAndAverage(blocks) {
     // Count tasks per day
     blocks.forEach(block => {
         if (block.editTime && block.editTime > 0) {
-            const date = new Date(block.editTime);
-            const dateStr = getLocalDateString(date);
-            dailyCounts[dateStr] = (dailyCounts[dateStr] || 0) + 1;
+            const date = getLocalDateString(new Date(block.editTime));
+            dailyCounts[date] = (dailyCounts[date] || 0) + 1;
         }
     });
     
-    console.log("Daily counts:", dailyCounts);
-    console.log("Today's date:", getLocalDateString(today));
-    
     // Calculate current streak
     let streak = 0;
-    let currentDate = new Date(today);
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);
     
     while (true) {
         const dateStr = getLocalDateString(currentDate);
@@ -117,46 +165,47 @@ function calculateStreakAndAverage(blocks) {
             streak++;
             currentDate.setDate(currentDate.getDate() - 1);
         } else {
+            // Check if we should look at yesterday (today might have no tasks yet)
+            if (streak === 0 && currentDate.getTime() === today.getTime()) {
+                currentDate.setDate(currentDate.getDate() - 1);
+                const yesterdayStr = getLocalDateString(currentDate);
+                if (dailyCounts[yesterdayStr] && dailyCounts[yesterdayStr] > 0) {
+                    streak = 1;
+                    currentDate.setDate(currentDate.getDate() - 1);
+                    
+                    // Continue counting backwards
+                    while (true) {
+                        const dateStr = getLocalDateString(currentDate);
+                        if (dailyCounts[dateStr] && dailyCounts[dateStr] > 0) {
+                            streak++;
+                            currentDate.setDate(currentDate.getDate() - 1);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
             break;
         }
     }
     
     // Calculate daily average (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(today.getDate() - 30);
     let totalTasks = 0;
     let activeDays = 0;
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
     
-    Object.entries(dailyCounts).forEach(([dateStr, count]) => {
-        const date = new Date(dateStr);
-        if (date >= thirtyDaysAgo && date <= today) {
-            totalTasks += count;
-            activeDays++;
-        }
-    });
+    for (let d = new Date(thirtyDaysAgo); d <= today; d.setDate(d.getDate() + 1)) {
+        const dateStr = getLocalDateString(d);
+        const count = dailyCounts[dateStr] || 0;
+        totalTasks += count;
+        if (count > 0) activeDays++;
+    }
     
-    const dailyAverage = activeDays > 0 ? (totalTasks / 30).toFixed(1) : 0;
+    const dailyAverage = activeDays > 0 ? (totalTasks / 30).toFixed(1) : "0.0";
     
     return { streak, dailyAverage, dailyCounts };
-}
-
-// Get total TODOs (not just DONE)
-async function getTotalTodos() {
-    try {
-        const query = `
-            [:find (count ?b)
-             :where
-             [?b :block/string ?string]
-             [(clojure.string/includes? ?string "{{[[TODO]]}}")]]
-        `;
-        
-        const result = await window.roamAlphaAPI.q(query);
-        console.log("Total TODOs found:", result[0]?.[0] || 0);
-        return result[0]?.[0] || 0;
-    } catch (error) {
-        console.error("Error fetching total TODOs:", error);
-        return 0;
-    }
 }
 
 // Calculate productivity score (0-100)
@@ -249,7 +298,139 @@ function calculateTaskVelocity(blocks) {
     };
 }
 
-// Calculate achievements
+// Calculate level and XP based on total completed tasks
+function calculateLevelAndXP(totalCompleted) {
+    // XP required per level increases gradually
+    const baseXP = 10;
+    const xpMultiplier = 1.2;
+    
+    let level = 1;
+    let totalXPRequired = 0;
+    let xpForCurrentLevel = baseXP;
+    
+    while (totalXPRequired + xpForCurrentLevel <= totalCompleted) {
+        totalXPRequired += xpForCurrentLevel;
+        level++;
+        xpForCurrentLevel = Math.floor(baseXP * Math.pow(xpMultiplier, level - 1));
+    }
+    
+    const xpInCurrentLevel = totalCompleted - totalXPRequired;
+    const xpProgress = (xpInCurrentLevel / xpForCurrentLevel) * 100;
+    
+    return {
+        level,
+        xp: xpInCurrentLevel,
+        xpRequired: xpForCurrentLevel,
+        xpProgress: Math.round(xpProgress)
+    };
+}
+
+// Main analytics generation function
+function generateTodoAnalytics(blocks) {
+    const analytics = {
+        totalCompleted: blocks.length,
+        dailyCounts: {},
+        weeklyTrend: {},
+        monthlyTrend: {},
+        hourDistribution: {},
+        weekdayDistribution: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 },
+        tags: {},
+        pages: {},
+        avgTaskLength: 0,
+        longestTask: null,
+        shortestTask: null,
+        taskDurations: []
+    };
+    
+    blocks.forEach(block => {
+        const date = block.editTime ? new Date(block.editTime) : null;
+        
+        if (date && block.editTime > 0) {
+            // Daily counts
+            const dateStr = getLocalDateString(date);
+            analytics.dailyCounts[dateStr] = (analytics.dailyCounts[dateStr] || 0) + 1;
+            
+            // Weekly trend
+            const weekStr = getWeekNumber(date);
+            analytics.weeklyTrend[weekStr] = (analytics.weeklyTrend[weekStr] || 0) + 1;
+            
+            // Monthly trend
+            const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            analytics.monthlyTrend[monthStr] = (analytics.monthlyTrend[monthStr] || 0) + 1;
+            
+            // Hour distribution
+            const hour = date.getHours();
+            analytics.hourDistribution[hour] = (analytics.hourDistribution[hour] || 0) + 1;
+            
+            // Weekday distribution (0 = Sunday)
+            const weekday = date.getDay();
+            analytics.weekdayDistribution[weekday]++;
+        }
+        
+        // Extract and count hashtags
+        const hashtags = extractHashtags(block.content);
+        hashtags.forEach(tag => {
+            analytics.tags[tag] = (analytics.tags[tag] || 0) + 1;
+        });
+        
+        // Extract and count page links
+        const pageLinks = extractPageLinks(block.content);
+        pageLinks.forEach(page => {
+            analytics.pages[page] = (analytics.pages[page] || 0) + 1;
+        });
+        
+        // Track page of origin
+        if (block.pageTitle) {
+            analytics.pages[block.pageTitle] = (analytics.pages[block.pageTitle] || 0) + 1;
+        }
+        
+        // Calculate task duration
+        const duration = calculateTaskDuration(block);
+        if (duration !== null) {
+            analytics.taskDurations.push({
+                content: block.content.substring(0, 100),
+                duration: duration,
+                uid: block.uid
+            });
+            
+            if (!analytics.longestTask || duration > analytics.longestTask.duration) {
+                analytics.longestTask = { content: block.content, duration, uid: block.uid };
+            }
+            
+            if (!analytics.shortestTask || duration < analytics.shortestTask.duration) {
+                analytics.shortestTask = { content: block.content, duration, uid: block.uid };
+            }
+        }
+    });
+    
+    // Calculate average task length
+    if (analytics.taskDurations.length > 0) {
+        const totalLength = analytics.taskDurations.reduce((sum, t) => sum + t.duration, 0);
+        analytics.avgTaskLength = totalLength / analytics.taskDurations.length;
+    }
+    
+    // Sort and limit
+    analytics.tags = Object.entries(analytics.tags)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .reduce((obj, [tag, count]) => ({ ...obj, [tag]: count }), {});
+    
+    analytics.pages = Object.entries(analytics.pages)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .reduce((obj, [page, count]) => ({ ...obj, [page]: count }), {});
+    
+    // Calculate velocity metrics
+    const velocityMetrics = calculateTaskVelocity(blocks);
+    analytics.avgVelocityHours = velocityMetrics.avgVelocityHours;
+    analytics.medianVelocityHours = velocityMetrics.medianVelocityHours;
+    
+    return analytics;
+}
+// ========== achievements module ==========
+// Achievements system for TODO analytics
+
+// Calculate achievements based on analytics
 function calculateAchievements(analytics) {
     const achievedIds = new Set();
     
@@ -377,196 +558,29 @@ function calculateAchievements(analytics) {
     
     return { achieved, unachieved, all: allAchievements };
 }
+// ========== charts module ==========
+// Chart components for visualization
 
-// Calculate level and XP
-function calculateLevelAndXP(totalCompleted) {
-    const xpPerTask = 10;
-    const totalXP = totalCompleted * xpPerTask;
-    
-    // Level calculation (exponential curve)
-    let level = 1;
-    let xpForNextLevel = 50;
-    let cumulativeXP = 0;
-    
-    while (cumulativeXP + xpForNextLevel <= totalXP) {
-        cumulativeXP += xpForNextLevel;
-        level++;
-        xpForNextLevel = Math.floor(50 * Math.pow(1.2, level - 1));
-    }
-    
-    const xpInCurrentLevel = totalXP - cumulativeXP;
-    const progressPercent = (xpInCurrentLevel / xpForNextLevel) * 100;
-    
-    return {
-        level,
-        totalXP,
-        xpInCurrentLevel,
-        xpForNextLevel,
-        progressPercent
-    };
-}
-
-// Generate todo analytics from blocks
-function generateTodoAnalytics(blocks) {
-    // Initialize distributions
-    const hourDistribution = {};
-    const weekdayDistribution = {};
-    const monthDistribution = {};
-    const tags = {};
-    const wordFrequency = {};
-    const durations = [];
-    const recentDates = {};
-    
-    // New distributions
-    const dailyDistributionMap = {};
-    const weeklyDistributionMap = {};
-    const yearlyDistributionMap = {};
-
-    // Debug log
-    console.log("Processing blocks:", blocks.length, "blocks");
-    console.log("Sample block:", blocks[0]);
-    
-    // Process blocks
-    blocks.forEach(block => {
-        // Time distributions
-        if (block.editTime && block.editTime > 0) {
-            const date = new Date(block.editTime);
-            const hour = date.getHours();
-            const weekday = date.getDay();
-            const month = date.getMonth();
-            const year = date.getFullYear();
-            const dateStr = getLocalDateString(date);
-            const weekStr = getWeekNumber(date);
-            
-            hourDistribution[hour] = (hourDistribution[hour] || 0) + 1;
-            weekdayDistribution[weekday] = (weekdayDistribution[weekday] || 0) + 1;
-            monthDistribution[month] = (monthDistribution[month] || 0) + 1;
-            
-            // New distributions
-            dailyDistributionMap[dateStr] = (dailyDistributionMap[dateStr] || 0) + 1;
-            weeklyDistributionMap[weekStr] = (weeklyDistributionMap[weekStr] || 0) + 1;
-            yearlyDistributionMap[year] = (yearlyDistributionMap[year] || 0) + 1;
-
-            // Recent trend (last 30 days)
-            const now = new Date();
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(now.getDate() - 30);
-            
-            if (date >= thirtyDaysAgo) {
-                recentDates[dateStr] = (recentDates[dateStr] || 0) + 1;
-            }
-        }
-
-        // Tags analysis
-        const blockTags = extractHashtags(block.content);
-        blockTags.forEach(tag => {
-            tags[tag] = (tags[tag] || 0) + 1;
-        });
-
-        // Word frequency (simple implementation)
-        const words = block.content
-            .replace(/{{.*?}}/g, '') // Remove Roam syntax
-            .replace(/\[\[.*?\]\]/g, '') // Remove page links
-            .replace(/#\w+/g, '') // Remove hashtags
-            .split(/\s+/)
-            .filter(word => word.length > 3) // Only count words longer than 3 chars
-            .map(word => word.toLowerCase());
-        
-        words.forEach(word => {
-            wordFrequency[word] = (wordFrequency[word] || 0) + 1;
-        });
-
-        // Task duration
-        const duration = calculateTaskDuration(block);
-        if (duration !== null && duration > 0 && duration < 24 * 365) { // Sanity check: less than a year
-            durations.push(duration);
-        }
-    });
-
-    // Calculate stats
-    let completionTimeAvg = null;
-    let completionTimeMedian = null;
-    
-    if (durations.length > 0) {
-        completionTimeAvg = durations.reduce((sum, d) => sum + d, 0) / durations.length;
-        durations.sort((a, b) => a - b);
-        completionTimeMedian = durations[Math.floor(durations.length / 2)];
-    }
-
-    // Prepare recent trend data
-    const dates = Object.keys(recentDates).sort();
-    const counts = dates.map(date => recentDates[date]);
-
-    // Convert maps to arrays for the new distributions
-    const now = new Date();
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(now.getDate() - 60);
-    const sixtyDaysAgoStr = getLocalDateString(sixtyDaysAgo);
-
-    const dailyDistribution = Object.entries(dailyDistributionMap)
-        .filter(([date]) => date >= sixtyDaysAgoStr)
-        .map(([date, count]) => ({ date, count }))
-        .sort((a, b) => a.date.localeCompare(b.date));
-
-    const weeklyDistribution = Object.entries(weeklyDistributionMap)
-        .map(([week, count]) => ({ week, count }))
-        .sort((a, b) => a.week.localeCompare(b.week))
-        .slice(-12); // Last 12 weeks
-
-    const yearlyDistribution = Object.entries(yearlyDistributionMap)
-        .map(([year, count]) => ({ year: parseInt(year), count }))
-        .sort((a, b) => a.year - b.year);
-
-    // Calculate velocity metrics
-    const velocityMetrics = calculateTaskVelocity(blocks);
-    
-    const analytics = {
-        hourDistribution,
-        weekdayDistribution,
-        monthDistribution,
-        completionTimeAvg,
-        completionTimeMedian,
-        tags,
-        wordFrequency,
-        totalCompleted: blocks.length,
-        recentTrend: {
-            dates,
-            counts
-        },
-        dailyDistribution,
-        weeklyDistribution,
-        yearlyDistribution,
-        blocks, // Include blocks for detail view
-        avgVelocityHours: velocityMetrics.avgVelocityHours,
-        medianVelocityHours: velocityMetrics.medianVelocityHours
-    };
-    
-    // Debug log
-    console.log("Generated analytics:", analytics);
-    
-    return analytics;
-}
-
-// Create last 10 days trend chart
-function createLast10DaysTrend(dailyCounts) {
-    console.log("[10-Day Trend] Input dailyCounts:", dailyCounts);
-    console.log("[10-Day Trend] Today's local date:", getLocalDateString(new Date()));
+// Create last 12 days trend chart
+function createLast12DaysTrend(dailyCounts) {
+    console.log("[12-Day Trend] Input dailyCounts:", dailyCounts);
+    console.log("[12-Day Trend] Today's local date:", getLocalDateString(new Date()));
     
     const container = document.createElement("div");
     container.className = "chart-container";
     
     const titleEl = document.createElement("h4");
-    titleEl.textContent = "Recent Task Completion Trend (Last 10 Days)";
+    titleEl.textContent = "Recent Task Completion Trend (Last 12 Days)";
     titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
     container.appendChild(titleEl);
     
-    // Get last 10 days
+    // Get last 12 days
     const dates = [];
     const counts = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    for (let i = 9; i >= 0; i--) {
+    for (let i = 11; i >= 0; i--) {
         const date = new Date(today);
         date.setDate(date.getDate() - i);
         const dateStr = getLocalDateString(date);
@@ -837,6 +851,314 @@ function createHeatmapCalendar(dailyCounts) {
     return container;
 }
 
+// Create a simple bar chart using divs
+function createBarChart(data, labels, title, color = "#106ba3", options = {}) {
+    const container = document.createElement("div");
+    container.className = "chart-container";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = title;
+    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
+    container.appendChild(titleEl);
+    
+    const chartWrapper = document.createElement("div");
+    const isHourChart = title.includes("Hour");
+    const gap = isHourChart ? "2px" : "4px";
+    chartWrapper.style.cssText = `display: flex; align-items: flex-end; gap: ${gap}; height: 180px; position: relative; padding: 0 8px;`;
+    
+    // Get all values for the chart
+    const values = labels.map((_, index) => data[index] || 0);
+    const maxValue = Math.max(...values, 1);
+    
+    // Debug log
+    console.log(`Chart: ${title}`, { data, labels, values, maxValue });
+    
+    labels.forEach((label, index) => {
+        const value = data[index] || 0;
+        const percentage = maxValue > 0 ? (value / maxValue) * 100 : 0;
+        
+        const barWrapper = document.createElement("div");
+        barWrapper.style.cssText = "flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; height: 100%;";
+        
+        const barContainer = document.createElement("div");
+        barContainer.style.cssText = "flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end;";
+        
+        const bar = document.createElement("div");
+        bar.style.cssText = `
+            width: 100%;
+            height: ${percentage}%;
+            background-color: ${color};
+            border-radius: 3px 3px 0 0;
+            transition: all 0.3s;
+            cursor: pointer;
+            min-height: ${value > 0 ? '4px' : '0'};
+        `;
+        bar.title = `${label}: ${value}`;
+        
+        // Add value label on hover
+        bar.onmouseenter = (e) => {
+            if (value > 0) {
+                const valueLabel = document.createElement("div");
+                valueLabel.className = "chart-value-label";
+                valueLabel.textContent = value.toString();
+                valueLabel.style.cssText = `
+                    position: absolute;
+                    bottom: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: #182026;
+                    color: white;
+                    padding: 2px 6px;
+                    border-radius: 2px;
+                    font-size: 11px;
+                    margin-bottom: 2px;
+                    white-space: nowrap;
+                    pointer-events: none;
+                    z-index: 10;
+                `;
+                barContainer.appendChild(valueLabel);
+            }
+        };
+        
+        bar.onmouseleave = (e) => {
+            const valueLabel = barContainer.querySelector(".chart-value-label");
+            if (valueLabel) valueLabel.remove();
+        };
+        
+        const labelEl = document.createElement("div");
+        // Now we have more space, show all labels
+        labelEl.textContent = label;
+        labelEl.style.cssText = `font-size: 11px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1;`;
+        
+        barContainer.appendChild(bar);
+        barWrapper.appendChild(barContainer);
+        barWrapper.appendChild(labelEl);
+        chartWrapper.appendChild(barWrapper);
+    });
+    
+    container.appendChild(chartWrapper);
+    return container;
+}
+
+// Create last 12 weeks trend chart
+function createLast12WeeksTrend(dailyCounts) {
+    const container = document.createElement("div");
+    container.className = "chart-container";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Weekly Task Completion Trend (Last 12 Weeks)";
+    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
+    container.appendChild(titleEl);
+    
+    // Calculate weekly totals
+    const weeklyData = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Get start of current week (Sunday)
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setDate(today.getDate() - today.getDay());
+    
+    // Calculate data for last 12 weeks
+    const weeks = [];
+    const counts = [];
+    
+    for (let i = 11; i >= 0; i--) {
+        const weekStart = new Date(currentWeekStart);
+        weekStart.setDate(weekStart.getDate() - (i * 7));
+        
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        
+        let weekTotal = 0;
+        const weekLabel = `${weekStart.getMonth() + 1}/${weekStart.getDate()}-${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
+        
+        // Sum up daily counts for this week
+        for (let d = new Date(weekStart); d <= weekEnd; d.setDate(d.getDate() + 1)) {
+            const dateStr = getLocalDateString(d);
+            weekTotal += dailyCounts[dateStr] || 0;
+        }
+        
+        weeks.push(weekLabel);
+        counts.push(weekTotal);
+    }
+    
+    // Create the chart
+    const chartWrapper = document.createElement("div");
+    chartWrapper.style.cssText = "display: flex; align-items: flex-end; gap: 6px; height: 150px; padding: 0 8px; background: #f5f8fa; border-radius: 4px; padding: 16px;";
+    
+    const maxCount = Math.max(...counts, 1);
+    
+    weeks.forEach((week, index) => {
+        const count = counts[index];
+        const percentage = (count / maxCount) * 100;
+        const isCurrentWeek = index === weeks.length - 1;
+        
+        const barWrapper = document.createElement("div");
+        barWrapper.style.cssText = "flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; height: 100%;";
+        
+        const barContainer = document.createElement("div");
+        barContainer.style.cssText = "flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end;";
+        
+        const bar = document.createElement("div");
+        bar.style.cssText = `
+            width: 100%;
+            height: ${percentage}%;
+            background-color: ${isCurrentWeek ? '#0f9960' : '#d9822b'};
+            border-radius: 4px 4px 0 0;
+            transition: all 0.3s;
+            cursor: pointer;
+            min-height: ${count > 0 ? '4px' : '0'};
+            position: relative;
+        `;
+        
+        // Add count label on the bar
+        if (count > 0) {
+            const countLabel = document.createElement("div");
+            countLabel.textContent = count;
+            countLabel.style.cssText = `
+                position: absolute;
+                top: -20px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 12px;
+                font-weight: 500;
+                color: #182026;
+            `;
+            bar.appendChild(countLabel);
+        }
+        
+        const labelEl = document.createElement("div");
+        labelEl.innerHTML = week.split('-').join('<br>');
+        labelEl.style.cssText = "font-size: 9px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1.2;";
+        
+        if (isCurrentWeek) {
+            labelEl.style.color = "#0f9960";
+            labelEl.style.fontWeight = "500";
+        }
+        
+        barContainer.appendChild(bar);
+        barWrapper.appendChild(barContainer);
+        barWrapper.appendChild(labelEl);
+        chartWrapper.appendChild(barWrapper);
+    });
+    
+    container.appendChild(chartWrapper);
+    return container;
+}
+
+// Create last 12 months trend chart
+function createLast12MonthsTrend(dailyCounts) {
+    const container = document.createElement("div");
+    container.className = "chart-container";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Monthly Task Completion Trend (Last 12 Months)";
+    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
+    container.appendChild(titleEl);
+    
+    // Calculate monthly totals
+    const today = new Date();
+    const months = [];
+    const counts = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    for (let i = 11; i >= 0; i--) {
+        const monthDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        const year = monthDate.getFullYear();
+        const month = monthDate.getMonth();
+        const monthLabel = `${monthNames[month]} ${year}`;
+        
+        let monthTotal = 0;
+        
+        // Get the last day of the month
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        
+        // Sum up daily counts for this month
+        for (let day = 1; day <= lastDay; day++) {
+            const date = new Date(year, month, day);
+            const dateStr = getLocalDateString(date);
+            monthTotal += dailyCounts[dateStr] || 0;
+        }
+        
+        months.push(monthLabel);
+        counts.push(monthTotal);
+    }
+    
+    // Create the chart
+    const chartWrapper = document.createElement("div");
+    chartWrapper.style.cssText = "display: flex; align-items: flex-end; gap: 6px; height: 150px; padding: 0 8px; background: #f5f8fa; border-radius: 4px; padding: 16px;";
+    
+    const maxCount = Math.max(...counts, 1);
+    
+    months.forEach((month, index) => {
+        const count = counts[index];
+        const percentage = (count / maxCount) * 100;
+        const isCurrentMonth = index === months.length - 1;
+        
+        const barWrapper = document.createElement("div");
+        barWrapper.style.cssText = "flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; height: 100%;";
+        
+        const barContainer = document.createElement("div");
+        barContainer.style.cssText = "flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end;";
+        
+        const bar = document.createElement("div");
+        bar.style.cssText = `
+            width: 100%;
+            height: ${percentage}%;
+            background-color: ${isCurrentMonth ? '#0f9960' : '#7157d9'};
+            border-radius: 4px 4px 0 0;
+            transition: all 0.3s;
+            cursor: pointer;
+            min-height: ${count > 0 ? '4px' : '0'};
+            position: relative;
+        `;
+        
+        // Add count label on the bar
+        if (count > 0) {
+            const countLabel = document.createElement("div");
+            countLabel.textContent = count;
+            countLabel.style.cssText = `
+                position: absolute;
+                top: -20px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 12px;
+                font-weight: 500;
+                color: #182026;
+            `;
+            bar.appendChild(countLabel);
+        }
+        
+        const labelEl = document.createElement("div");
+        const [monthName, year] = month.split(' ');
+        labelEl.innerHTML = `${monthName}<br>${year}`;
+        labelEl.style.cssText = "font-size: 9px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1.2;";
+        
+        if (isCurrentMonth) {
+            labelEl.style.color = "#0f9960";
+            labelEl.style.fontWeight = "500";
+        }
+        
+        barContainer.appendChild(bar);
+        barWrapper.appendChild(barContainer);
+        barWrapper.appendChild(labelEl);
+        chartWrapper.appendChild(barWrapper);
+    });
+    
+    container.appendChild(chartWrapper);
+    return container;
+}
+
+// ========== uiComponents module ==========
+// UI Components for the Todo Analysis extension
+
+
+
+
+
+const POPUP_ID = "todo-analysis-popup";
+
 // Create logbook view
 function createLogbookView(container, analytics) {
     // Date selector
@@ -959,95 +1281,6 @@ function createLogbookView(container, analytics) {
     dateInput.onchange = updateLogbook;
 }
 
-// Create a simple bar chart using divs
-function createBarChart(data, labels, title, color = "#106ba3", options = {}) {
-    const container = document.createElement("div");
-    container.className = "chart-container";
-    
-    const titleEl = document.createElement("h4");
-    titleEl.textContent = title;
-    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
-    container.appendChild(titleEl);
-    
-    const chartWrapper = document.createElement("div");
-    const isHourChart = title.includes("Hour");
-    const gap = isHourChart ? "2px" : "4px";
-    chartWrapper.style.cssText = `display: flex; align-items: flex-end; gap: ${gap}; height: 180px; position: relative; padding: 0 8px;`;
-    
-    // Get all values for the chart
-    const values = labels.map((_, index) => data[index] || 0);
-    const maxValue = Math.max(...values, 1);
-    
-    // Debug log
-    console.log(`Chart: ${title}`, { data, labels, values, maxValue });
-    
-    labels.forEach((label, index) => {
-        const value = data[index] || 0;
-        const percentage = maxValue > 0 ? (value / maxValue) * 100 : 0;
-        
-        const barWrapper = document.createElement("div");
-        barWrapper.style.cssText = "flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; height: 100%;";
-        
-        const barContainer = document.createElement("div");
-        barContainer.style.cssText = "flex: 1; width: 100%; position: relative; display: flex; align-items: flex-end;";
-        
-        const bar = document.createElement("div");
-        bar.style.cssText = `
-            width: 100%;
-            height: ${percentage}%;
-            background-color: ${color};
-            border-radius: 3px 3px 0 0;
-            transition: all 0.3s;
-            cursor: pointer;
-            min-height: ${value > 0 ? '4px' : '0'};
-        `;
-        bar.title = `${label}: ${value}`;
-        
-        // Add value label on hover
-        bar.onmouseenter = (e) => {
-            if (value > 0) {
-                const valueLabel = document.createElement("div");
-                valueLabel.className = "chart-value-label";
-                valueLabel.textContent = value.toString();
-                valueLabel.style.cssText = `
-                    position: absolute;
-                    bottom: 100%;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    background: #182026;
-                    color: white;
-                    padding: 2px 6px;
-                    border-radius: 2px;
-                    font-size: 11px;
-                    margin-bottom: 2px;
-                    white-space: nowrap;
-                    pointer-events: none;
-                    z-index: 10;
-                `;
-                barContainer.appendChild(valueLabel);
-            }
-        };
-        
-        bar.onmouseleave = (e) => {
-            const valueLabel = barContainer.querySelector(".chart-value-label");
-            if (valueLabel) valueLabel.remove();
-        };
-        
-        const labelEl = document.createElement("div");
-        // Now we have more space, show all labels
-        labelEl.textContent = label;
-        labelEl.style.cssText = `font-size: 11px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1;`;
-        
-        barContainer.appendChild(bar);
-        barWrapper.appendChild(barContainer);
-        barWrapper.appendChild(labelEl);
-        chartWrapper.appendChild(barWrapper);
-    });
-    
-    container.appendChild(chartWrapper);
-    return container;
-}
-
 // Create the analytics popup
 function createPopup() {
     const overlay = document.createElement("div");
@@ -1100,6 +1333,30 @@ function createPopup() {
     const refreshButton = document.createElement("button");
     refreshButton.className = "bp3-button bp3-minimal bp3-icon-refresh";
     refreshButton.title = "Refresh data";
+    
+    const closeButton = document.createElement("button");
+    closeButton.className = "bp3-button bp3-minimal bp3-icon-cross";
+    closeButton.onclick = () => overlay.remove();
+    
+    buttonGroup.appendChild(refreshButton);
+    buttonGroup.appendChild(closeButton);
+    
+    header.appendChild(title);
+    header.appendChild(buttonGroup);
+    
+    const content = document.createElement("div");
+    content.className = "bp3-dialog-body";
+    content.style.cssText = `
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 4px;
+    `;
+    
+    popup.appendChild(header);
+    popup.appendChild(content);
+    overlay.appendChild(popup);
+    
+    // Make refresh button work
     refreshButton.onclick = async () => {
         // Show loading state
         content.innerHTML = `
@@ -1125,6 +1382,7 @@ function createPopup() {
                 analytics.dailyAverage = dailyAverage;
                 analytics.totalTodos = totalTodos;
                 analytics.dailyCounts = dailyCounts;
+                analytics.blocks = doneBlocks;
                 
                 displayAnalytics(content, analytics);
             } catch (error) {
@@ -1138,39 +1396,62 @@ function createPopup() {
         }, 100);
     };
     
-    const closeButton = document.createElement("button");
-    closeButton.className = "bp3-button bp3-minimal bp3-icon-cross";
-    closeButton.onclick = () => overlay.remove();
+    return { overlay, content };
+}
+
+// Create topbar button
+function createTopbarButton() {
+    const button = document.createElement("button");
+    button.id = "todo-analysis-button";
+    button.className = "bp3-button bp3-minimal bp3-icon-timeline-events";
+    button.title = "Todo Analysis";
+    button.style.cssText = "margin: 0 4px;";
     
-    buttonGroup.appendChild(refreshButton);
-    buttonGroup.appendChild(closeButton);
-    
-    header.appendChild(title);
-    header.appendChild(buttonGroup);
-    
-    const content = document.createElement("div");
-    content.className = "bp3-dialog-body todo-analysis-content";
-    content.style.cssText = `
-        overflow-y: auto;
-        flex: 1;
-    `;
-    content.innerHTML = '<div class="bp3-spinner"><div class="bp3-spinner-animation"></div></div>';
-    
-    popup.appendChild(header);
-    popup.appendChild(content);
-    overlay.appendChild(popup);
-    
-    overlay.onclick = (e) => {
-        if (e.target === overlay) {
-            overlay.remove();
+    button.onclick = async () => {
+        // Check if popup already exists
+        if (document.getElementById(POPUP_ID)) return;
+        
+        const { overlay, content } = createPopup();
+        document.body.appendChild(overlay);
+        
+        // Show loading state
+        content.innerHTML = `
+            <div style="text-align: center; padding: 40px;">
+                <div class="bp3-spinner">
+                    <div class="bp3-spinner-animation"></div>
+                </div>
+                <div style="margin-top: 16px; color: #5c7080;">Loading analytics...</div>
+            </div>
+        `;
+        
+        // Fetch data and generate analytics
+        try {
+            const [doneBlocks, totalTodos] = await Promise.all([
+                getTodoBlocks("DONE"),
+                getTotalTodos()
+            ]);
+            
+            const { streak, dailyAverage, dailyCounts } = calculateStreakAndAverage(doneBlocks);
+            const analytics = generateTodoAnalytics(doneBlocks);
+            analytics.streak = streak;
+            analytics.dailyAverage = dailyAverage;
+            analytics.totalTodos = totalTodos;
+            analytics.dailyCounts = dailyCounts;
+            analytics.blocks = doneBlocks;
+            
+            displayAnalytics(content, analytics);
+        } catch (error) {
+            console.error("Error loading analytics:", error);
+            content.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #d13913;">
+                    <div style="font-size: 18px; margin-bottom: 8px;">Error loading analytics</div>
+                    <div style="font-size: 14px; color: #5c7080;">${error.message}</div>
+                </div>
+            `;
         }
     };
     
-    popup.onclick = (e) => {
-        e.stopPropagation();
-    };
-    
-    return { overlay, content };
+    return button;
 }
 
 // Display analytics in the popup
@@ -1232,26 +1513,178 @@ function displayAnalytics(content, analytics) {
     panelsContainer.className = "bp3-tab-panels";
     content.appendChild(panelsContainer);
     
-    // Create Overview tab panel
-    const overviewPanel = document.createElement("div");
-    overviewPanel.className = "bp3-tab-panel";
-    overviewPanel.style.display = "block";
-    tabPanels.overview = overviewPanel;
+    // Create and populate each tab panel
+    createOverviewPanel(tabPanels, panelsContainer, analytics);
+    createChartsPanel(tabPanels, panelsContainer, analytics);
+    createLogbookPanel(tabPanels, panelsContainer, analytics);
+    createAchievementPanel(tabPanels, panelsContainer, analytics);
+    createHandbookPanel(tabPanels, panelsContainer);
+}
+
+// Helper functions to create individual panels
+function createOverviewPanel(tabPanels, container, analytics) {
+    const panel = document.createElement("div");
+    panel.className = "bp3-tab-panel";
+    panel.style.display = "block";
+    tabPanels.overview = panel;
     
-    // Data Overview section
-    const overviewSection = document.createElement("div");
-    overviewSection.className = "analytics-section";
-    overviewSection.style.cssText = "margin-bottom: 24px;";
-    
-    const overviewTitle = document.createElement("h3");
-    overviewTitle.textContent = "Data Overview";
-    overviewTitle.style.cssText = "margin: 0 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
-    overviewSection.appendChild(overviewTitle);
-    
-    // Add productivity score
+    // Productivity Score
     const productivityScoreData = calculateProductivityScore(analytics);
-    const scoreContainer = document.createElement("div");
-    scoreContainer.style.cssText = "margin-bottom: 20px;";
+    const scoreContainer = createProductivityScoreSection(productivityScoreData);
+    panel.appendChild(scoreContainer);
+    
+    // Key metrics grid
+    const metricsGrid = createMetricsGrid(analytics);
+    panel.appendChild(metricsGrid);
+    
+    // Trend charts section
+    const trendSection = document.createElement("div");
+    trendSection.style.cssText = "margin-top: 24px;";
+    
+    // Section title
+    const trendTitle = document.createElement("h3");
+    trendTitle.textContent = "Task Completion Trends";
+    trendTitle.style.cssText = "margin: 0 0 20px 0; color: #182026; font-size: 18px; font-weight: 600;";
+    trendSection.appendChild(trendTitle);
+    
+    // Daily trend (12 days)
+    const dailyTrend = createLast12DaysTrend(analytics.dailyCounts);
+    trendSection.appendChild(dailyTrend);
+    
+    // Weekly trend (12 weeks)
+    const weeklyTrend = createLast12WeeksTrend(analytics.dailyCounts);
+    weeklyTrend.style.marginTop = "20px";
+    trendSection.appendChild(weeklyTrend);
+    
+    // Monthly trend (12 months)
+    const monthlyTrend = createLast12MonthsTrend(analytics.dailyCounts);
+    monthlyTrend.style.marginTop = "20px";
+    trendSection.appendChild(monthlyTrend);
+    
+    panel.appendChild(trendSection);
+    container.appendChild(panel);
+}
+
+function createChartsPanel(tabPanels, container, analytics) {
+    const panel = document.createElement("div");
+    panel.className = "bp3-tab-panel";
+    panel.style.display = "none";
+    tabPanels.charts = panel;
+    
+    // Charts grid
+    const chartsGrid = document.createElement("div");
+    chartsGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;";
+    
+    // Hour distribution
+    const hourData = Array.from({ length: 24 }, (_, i) => analytics.hourDistribution[i] || 0);
+    const hourLabels = Array.from({ length: 24 }, (_, i) => {
+        if (i === 0) return "12AM";
+        if (i === 12) return "12PM";
+        return i < 12 ? `${i}` : `${i-12}`;
+    });
+    const hourChart = createBarChart(hourData, hourLabels, "Tasks by Hour of Day", "#106ba3");
+    chartsGrid.appendChild(hourChart);
+    
+    // Weekday distribution
+    const weekdayData = Object.values(analytics.weekdayDistribution);
+    const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekdayChart = createBarChart(weekdayData, weekdayLabels, "Tasks by Day of Week", "#0f9960");
+    chartsGrid.appendChild(weekdayChart);
+    
+    panel.appendChild(chartsGrid);
+    
+    // Heatmap calendar
+    const heatmapTitle = document.createElement("h3");
+    heatmapTitle.textContent = "Activity Calendar";
+    heatmapTitle.style.cssText = "margin: 24px 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
+    panel.appendChild(heatmapTitle);
+    
+    const heatmap = createHeatmapCalendar(analytics.dailyCounts);
+    panel.appendChild(heatmap);
+    
+    container.appendChild(panel);
+}
+
+function createLogbookPanel(tabPanels, container, analytics) {
+    const panel = document.createElement("div");
+    panel.className = "bp3-tab-panel";
+    panel.style.display = "none";
+    tabPanels.logbook = panel;
+    
+    createLogbookView(panel, analytics);
+    
+    container.appendChild(panel);
+}
+
+function createAchievementPanel(tabPanels, container, analytics) {
+    const panel = document.createElement("div");
+    panel.className = "bp3-tab-panel";
+    panel.style.display = "none";
+    tabPanels.achievement = panel;
+    
+    const achievements = calculateAchievements(analytics);
+    const levelData = calculateLevelAndXP(analytics.totalCompleted);
+    
+    // Level and XP section
+    const levelSection = createLevelSection(levelData, analytics);
+    panel.appendChild(levelSection);
+    
+    // Achievements section
+    const achievementsSection = createAchievementsSection(achievements);
+    panel.appendChild(achievementsSection);
+    
+    container.appendChild(panel);
+}
+
+function createHandbookPanel(tabPanels, container) {
+    const panel = document.createElement("div");
+    panel.className = "bp3-tab-panel";
+    panel.style.display = "none";
+    tabPanels.handbook = panel;
+    
+    panel.innerHTML = `
+        <div style="padding: 20px; background: #f5f8fa; border-radius: 8px;">
+            <h3 style="margin: 0 0 16px 0; color: #182026;">How to Use Todo Analysis</h3>
+            
+            <div style="margin-bottom: 20px;">
+                <h4 style="color: #182026; margin-bottom: 8px;">📊 Overview Tab</h4>
+                <p style="color: #5c7080; margin: 0 0 8px 0;">View your productivity score, key metrics, and recent trends at a glance.</p>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <h4 style="color: #182026; margin-bottom: 8px;">📈 Charts Tab</h4>
+                <p style="color: #5c7080; margin: 0 0 8px 0;">Analyze your task completion patterns by hour, day of week, and view your activity heatmap.</p>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <h4 style="color: #182026; margin-bottom: 8px;">📖 Logbook Tab</h4>
+                <p style="color: #5c7080; margin: 0 0 8px 0;">Review tasks completed on specific days. Click on any task to open it in Roam.</p>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <h4 style="color: #182026; margin-bottom: 8px;">🏆 Achievement Tab</h4>
+                <p style="color: #5c7080; margin: 0 0 8px 0;">Track your progress with levels, XP, and unlock achievements as you complete more tasks.</p>
+            </div>
+            
+            <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e1e8ed;">
+                <h4 style="color: #182026; margin-bottom: 8px;">Tips for Better Productivity</h4>
+                <ul style="color: #5c7080; margin: 0; padding-left: 20px;">
+                    <li>Maintain a daily streak by completing at least one task every day</li>
+                    <li>Use hashtags to categorize your tasks for better organization</li>
+                    <li>Review your hourly patterns to find your most productive times</li>
+                    <li>Set daily goals based on your average completion rate</li>
+                </ul>
+            </div>
+        </div>
+    `;
+    
+    container.appendChild(panel);
+}
+
+// Helper functions for creating UI sections
+function createProductivityScoreSection(scoreData) {
+    const container = document.createElement("div");
+    container.style.cssText = "margin-bottom: 24px;";
     
     // Main score circle
     const mainScoreContainer = document.createElement("div");
@@ -1262,7 +1695,7 @@ function displayAnalytics(content, analytics) {
         width: 120px;
         height: 120px;
         border-radius: 50%;
-        background: conic-gradient(#0f9960 0deg, #0f9960 ${productivityScoreData.total * 3.6}deg, #e1e8ed ${productivityScoreData.total * 3.6}deg);
+        background: conic-gradient(#0f9960 0deg, #0f9960 ${scoreData.total * 3.6}deg, #e1e8ed ${scoreData.total * 3.6}deg);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1283,19 +1716,19 @@ function displayAnalytics(content, analytics) {
     `;
     
     scoreInner.innerHTML = `
-        <div style="font-size: 32px; font-weight: bold; color: #0f9960;">${productivityScoreData.total}</div>
+        <div style="font-size: 32px; font-weight: bold; color: #0f9960;">${scoreData.total}</div>
         <div style="font-size: 12px; color: #5c7080;">Productivity Score</div>
     `;
     
     scoreCircle.appendChild(scoreInner);
     mainScoreContainer.appendChild(scoreCircle);
-    scoreContainer.appendChild(mainScoreContainer);
+    container.appendChild(mainScoreContainer);
     
     // Component scores breakdown
     const componentsContainer = document.createElement("div");
-    componentsContainer.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;";
+    componentsContainer.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;";
     
-    Object.entries(productivityScoreData.components).forEach(([key, component]) => {
+    Object.entries(scoreData.components).forEach(([key, component]) => {
         const componentCard = document.createElement("div");
         componentCard.style.cssText = "background: #f5f8fa; border-radius: 8px; padding: 12px; border: 1px solid #e1e8ed;";
         
@@ -1322,595 +1755,177 @@ function displayAnalytics(content, analytics) {
         componentsContainer.appendChild(componentCard);
     });
     
-    scoreContainer.appendChild(componentsContainer);
-    overviewSection.appendChild(scoreContainer);
+    container.appendChild(componentsContainer);
+    return container;
+}
+
+function createMetricsGrid(analytics) {
+    const grid = document.createElement("div");
+    grid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;";
     
-    // Add level and XP
-    const { level, totalXP, xpInCurrentLevel, xpForNextLevel, progressPercent } = calculateLevelAndXP(analytics.totalCompleted);
-    const levelContainer = document.createElement("div");
-    levelContainer.style.cssText = "margin-bottom: 20px; padding: 16px; background: #f5f8fa; border-radius: 8px;";
-    
-    levelContainer.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <div style="font-size: 18px; font-weight: 600; color: #182026;">Level ${level}</div>
-            <div style="font-size: 14px; color: #5c7080;">${totalXP} XP Total</div>
-        </div>
-        <div style="background: #e1e8ed; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 4px;">
-            <div style="background: #106ba3; height: 100%; width: ${progressPercent}%; transition: width 0.3s;"></div>
-        </div>
-        <div style="font-size: 12px; color: #5c7080; text-align: right;">${xpInCurrentLevel} / ${xpForNextLevel} XP</div>
-    `;
-    
-    overviewSection.appendChild(levelContainer);
-    
-    const summaryGrid = document.createElement("div");
-    summaryGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px;";
-    
-    const stats = [
-        { label: "Total Completed", value: analytics.totalCompleted, icon: "✅" },
-        { label: "Total TODOs", value: analytics.totalTodos, icon: "📝" },
-        { label: "Total Tags", value: Object.keys(analytics.tags).length, icon: "🏷️" },
-        { label: "Day Streak", value: `${analytics.streak} days`, icon: "🔥" },
-        { label: "Daily Average", value: analytics.dailyAverage, icon: "📊" },
-        { label: "Avg Velocity", value: analytics.avgVelocityHours ? `${analytics.avgVelocityHours.toFixed(1)}h` : "N/A", icon: "⚡" }
+    const metrics = [
+        { label: "Total Completed", value: formatNumber(analytics.totalCompleted), icon: "✅", color: "#0f9960" },
+        { label: "Current Streak", value: `${analytics.streak} days`, icon: "🔥", color: "#d13913" },
+        { label: "Daily Average", value: analytics.dailyAverage, icon: "📊", color: "#106ba3" },
+        { label: "Total TODOs", value: formatNumber(analytics.totalTodos), icon: "📝", color: "#5c7080" }
     ];
     
-    stats.forEach(stat => {
-        const statEl = document.createElement("div");
-        statEl.style.cssText = "background: #f5f8fa; border-radius: 8px; padding: 16px; text-align: center;";
-        statEl.innerHTML = `
-            <div style="font-size: 20px; margin-bottom: 8px;">${stat.icon}</div>
-            <div style="font-size: 24px; font-weight: bold; color: #106ba3; margin-bottom: 4px;">${stat.value}</div>
-            <div style="font-size: 12px; color: #5c7080;">${stat.label}</div>
+    metrics.forEach(metric => {
+        const card = document.createElement("div");
+        card.style.cssText = "background: #f5f8fa; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #e1e8ed;";
+        card.innerHTML = `
+            <div style="font-size: 24px; margin-bottom: 8px;">${metric.icon}</div>
+            <div style="font-size: 24px; font-weight: bold; color: ${metric.color}; margin-bottom: 4px;">${metric.value}</div>
+            <div style="font-size: 14px; color: #5c7080;">${metric.label}</div>
         `;
-        summaryGrid.appendChild(statEl);
+        grid.appendChild(card);
     });
     
-    overviewSection.appendChild(summaryGrid);
+    return grid;
+}
+
+function createLevelSection(levelData, analytics) {
+    const section = document.createElement("div");
+    section.style.cssText = "margin-bottom: 32px;";
     
-    // Add Recent Task Completion Trend to Overview
-    const recentTrendSection = document.createElement("div");
-    recentTrendSection.style.cssText = "margin-top: 24px;";
+    const levelCard = document.createElement("div");
+    levelCard.style.cssText = "background: linear-gradient(135deg, #106ba3, #0f9960); color: white; padding: 24px; border-radius: 12px; text-align: center;";
     
-    const recentTrendTitle = document.createElement("h4");
-    recentTrendTitle.textContent = "Recent Task Completion Trend";
-    recentTrendTitle.style.cssText = "margin: 0 0 12px 0; color: #5c7080; font-size: 14px; font-weight: 500;";
-    recentTrendSection.appendChild(recentTrendTitle);
-    
-    const last10Days = createLast10DaysTrend(analytics.dailyCounts);
-    recentTrendSection.appendChild(last10Days);
-    overviewSection.appendChild(recentTrendSection);
-    
-    // Add Activity Heatmap to Overview
-    const heatmapSection = document.createElement("div");
-    heatmapSection.style.cssText = "margin-top: 24px;";
-    
-    const heatmapTitle = document.createElement("h4");
-    heatmapTitle.textContent = "Activity Heatmap";
-    heatmapTitle.style.cssText = "margin: 0 0 12px 0; color: #5c7080; font-size: 14px; font-weight: 500;";
-    heatmapSection.appendChild(heatmapTitle);
-    
-    const heatmapContainer = createHeatmapCalendar(analytics.dailyCounts);
-    heatmapSection.appendChild(heatmapContainer);
-    overviewSection.appendChild(heatmapSection);
-    
-    overviewPanel.appendChild(overviewSection);
-    
-    // Create Charts tab panel
-    const chartsPanel = document.createElement("div");
-    chartsPanel.className = "bp3-tab-panel";
-    chartsPanel.style.display = "none";
-    tabPanels.charts = chartsPanel;
-    
-    const chartsSection = document.createElement("div");
-    chartsSection.style.cssText = "margin-bottom: 24px;";
-    
-    const chartsTitle = document.createElement("h3");
-    chartsTitle.textContent = "Charts";
-    chartsTitle.style.cssText = "margin: 0 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
-    chartsSection.appendChild(chartsTitle);
-    
-    // Distribution subsection
-    const distributionCharts = document.createElement("div");
-    distributionCharts.style.cssText = "margin-bottom: 24px;";
-    
-    const distributionSubtitle = document.createElement("h4");
-    distributionSubtitle.textContent = "Distribution";
-    distributionSubtitle.style.cssText = "margin: 0 0 12px 0; color: #5c7080; font-size: 14px; font-weight: 500;";
-    distributionCharts.appendChild(distributionSubtitle);
-    
-    const chartsContainer = document.createElement("div");
-    chartsContainer.style.cssText = "display: flex; flex-direction: column; gap: 20px;";
-    
-    // Hourly distribution
-    const hourLabels = Array.from({length: 24}, (_, i) => i.toString());
-    const hourChart = createBarChart(analytics.hourDistribution, hourLabels, "Hourly Distribution (24h)", "#106ba3");
-    chartsContainer.appendChild(hourChart);
-    
-    // Daily distribution (days of week starting Monday)
-    const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    const weekdayData = [1, 2, 3, 4, 5, 6, 0].map(day => analytics.weekdayDistribution[day] || 0);
-    const weekdayChart = createBarChart(weekdayData, weekdayLabels, "Weekly Distribution", "#0f9960");
-    chartsContainer.appendChild(weekdayChart);
-    
-    // Monthly distribution
-    const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthChart = createBarChart(analytics.monthDistribution, monthLabels, "Monthly Distribution", "#d13913");
-    chartsContainer.appendChild(monthChart);
-    
-    distributionCharts.appendChild(chartsContainer);
-    chartsSection.appendChild(distributionCharts);
-    chartsPanel.appendChild(chartsSection);
-    
-    // Create Logbook tab panel
-    const logbookPanel = document.createElement("div");
-    logbookPanel.className = "bp3-tab-panel";
-    logbookPanel.style.display = "none";
-    tabPanels.logbook = logbookPanel;
-    
-    const logbookSection = document.createElement("div");
-    logbookSection.className = "analytics-section";
-    logbookSection.style.cssText = "margin-bottom: 24px;";
-    
-    const logbookTitle = document.createElement("h3");
-    logbookTitle.textContent = "Logbook";
-    logbookTitle.style.cssText = "margin: 0 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
-    logbookSection.appendChild(logbookTitle);
-    
-    // Add day selector and list
-    createLogbookView(logbookSection, analytics);
-    logbookPanel.appendChild(logbookSection);
-    
-    // Top tags - Add to logbook panel
-    const topTags = Object.entries(analytics.tags)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10);
-    
-    if (topTags.length > 0) {
-        const tagsSection = document.createElement("div");
-        tagsSection.className = "analytics-section";
-        tagsSection.style.cssText = "margin-bottom: 24px;";
-        
-        const tagsTitle = document.createElement("h4");
-        tagsTitle.textContent = "Top Tags";
-        tagsTitle.style.cssText = "margin: 0 0 12px 0; color: #182026;";
-        tagsSection.appendChild(tagsTitle);
-        
-        const tagsList = document.createElement("div");
-        tagsList.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px;";
-        
-        topTags.forEach(([tag, count]) => {
-            const tagEl = document.createElement("span");
-            tagEl.className = "bp3-tag";
-            tagEl.textContent = `#${tag} (${count})`;
-            tagEl.style.cssText = "background: #e1e8ed; color: #182026;";
-            tagsList.appendChild(tagEl);
-        });
-        
-        tagsSection.appendChild(tagsList);
-        logbookPanel.appendChild(tagsSection);
-    }
-    
-    // Create Achievement tab panel
-    const achievementPanel = document.createElement("div");
-    achievementPanel.className = "bp3-tab-panel";
-    achievementPanel.style.display = "none";
-    tabPanels.achievement = achievementPanel;
-    
-    const achievementSection = document.createElement("div");
-    achievementSection.className = "analytics-section";
-    
-    const achievementTitle = document.createElement("h3");
-    achievementTitle.textContent = "Achievements";
-    achievementTitle.style.cssText = "margin: 0 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
-    achievementSection.appendChild(achievementTitle);
-    
-    const achievementsData = calculateAchievements(analytics);
-    
-    // Achieved section
-    if (achievementsData.achieved.length > 0) {
-        const achievedTitle = document.createElement("h4");
-        achievedTitle.textContent = "Unlocked Achievements";
-        achievedTitle.style.cssText = "margin: 0 0 12px 0; color: #0f9960; font-size: 16px; font-weight: 600;";
-        achievementSection.appendChild(achievedTitle);
-        
-        const achievementsList = document.createElement("div");
-        achievementsList.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-bottom: 32px;";
-        
-        achievementsData.achieved.forEach(achievement => {
-            const achievementCard = document.createElement("div");
-            achievementCard.style.cssText = `
-                background: #f5f8fa;
-                border-radius: 8px;
-                padding: 16px;
-                border: 1px solid #e1e8ed;
-                transition: all 0.2s;
-                cursor: help;
-            `;
-            
-            achievementCard.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                    <span style="font-size: 32px;">${achievement.icon}</span>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600; color: #182026; font-size: 14px;">${achievement.name}</div>
-                        <div style="font-size: 12px; color: #5c7080; margin-top: 2px;">${achievement.desc}</div>
-                    </div>
-                </div>
-            `;
-            
-            achievementCard.onmouseenter = () => {
-                achievementCard.style.transform = "translateY(-2px)";
-                achievementCard.style.boxShadow = "0 4px 8px rgba(0,0,0,0.1)";
-            };
-            
-            achievementCard.onmouseleave = () => {
-                achievementCard.style.transform = "translateY(0)";
-                achievementCard.style.boxShadow = "none";
-            };
-            
-            achievementsList.appendChild(achievementCard);
-        });
-        
-        achievementSection.appendChild(achievementsList);
-    }
-    
-    // Unachieved section
-    if (achievementsData.unachieved.length > 0) {
-        const unachievedTitle = document.createElement("h4");
-        unachievedTitle.textContent = "Locked Achievements";
-        unachievedTitle.style.cssText = "margin: 32px 0 12px 0; color: #5c7080; font-size: 16px; font-weight: 600;";
-        achievementSection.appendChild(unachievedTitle);
-        
-        const unachievedList = document.createElement("div");
-        unachievedList.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px;";
-        
-        // Group unachieved by category
-        const categories = {};
-        achievementsData.unachieved.forEach(achievement => {
-            const cat = achievement.category || 'other';
-            if (!categories[cat]) categories[cat] = [];
-            categories[cat].push(achievement);
-        });
-        
-        // Show a sample of unachieved from each category
-        Object.entries(categories).forEach(([category, achievements]) => {
-            // Show up to 3 from each category
-            achievements.slice(0, 3).forEach(achievement => {
-                const achievementCard = document.createElement("div");
-                achievementCard.style.cssText = `
-                    background: #f5f8fa;
-                    border-radius: 8px;
-                    padding: 16px;
-                    border: 1px solid #e1e8ed;
-                    opacity: 0.6;
-                    position: relative;
-                    overflow: hidden;
-                `;
-                
-                achievementCard.innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                        <span style="font-size: 32px; filter: grayscale(100%);">${achievement.icon}</span>
-                        <div style="flex: 1;">
-                            <div style="font-weight: 600; color: #5c7080; font-size: 14px;">${achievement.name}</div>
-                            <div style="font-size: 12px; color: #a7b1bb; margin-top: 2px;">${achievement.desc}</div>
-                        </div>
-                    </div>
-                    <div style="position: absolute; top: 8px; right: 8px;">
-                        <span style="font-size: 20px;">🔒</span>
-                    </div>
-                `;
-                
-                unachievedList.appendChild(achievementCard);
-            });
-        });
-        
-        // Add "and X more..." card if there are more
-        const remainingCount = achievementsData.unachieved.length - unachievedList.children.length;
-        if (remainingCount > 0) {
-            const moreCard = document.createElement("div");
-            moreCard.style.cssText = `
-                background: #f5f8fa;
-                border-radius: 8px;
-                padding: 16px;
-                border: 1px solid #e1e8ed;
-                opacity: 0.6;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 100px;
-            `;
-            moreCard.innerHTML = `
-                <div style="text-align: center; color: #5c7080;">
-                    <div style="font-size: 24px; margin-bottom: 8px;">🔮</div>
-                    <div style="font-weight: 600;">And ${remainingCount} more...</div>
-                    <div style="font-size: 12px; margin-top: 4px;">Keep going to unlock them all!</div>
-                </div>
-            `;
-            unachievedList.appendChild(moreCard);
-        }
-        
-        achievementSection.appendChild(unachievedList);
-    }
-    
-    achievementPanel.appendChild(achievementSection);
-    
-    // Create Handbook tab panel
-    const handbookPanel = document.createElement("div");
-    handbookPanel.className = "bp3-tab-panel";
-    handbookPanel.style.display = "none";
-    tabPanels.handbook = handbookPanel;
-    
-    const handbookSection = document.createElement("div");
-    handbookSection.className = "analytics-section";
-    
-    const handbookTitle = document.createElement("h3");
-    handbookTitle.textContent = "Handbook";
-    handbookTitle.style.cssText = "margin: 0 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
-    handbookSection.appendChild(handbookTitle);
-    
-    handbookSection.innerHTML += `
-        <div style="space-y: 24px;">
-            <div style="margin-bottom: 24px;">
-                <h4 style="margin: 0 0 12px 0; color: #182026; font-size: 16px; font-weight: 600;">📊 Productivity Score</h4>
-                <p style="color: #5c7080; line-height: 1.6; margin-bottom: 12px;">
-                    Your productivity score (0-100) is calculated based on four key components, each contributing to your overall productivity profile:
-                </p>
-                <div style="background: #f5f8fa; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                    <h5 style="margin: 0 0 8px 0; color: #d13913; font-size: 14px;">🔥 Streak Score (30 points max)</h5>
-                    <p style="color: #5c7080; font-size: 13px; line-height: 1.6; margin: 0;">
-                        Rewards consecutive days of task completion. Each day adds 3 points (up to 10 days = 30 points).
-                        Maintaining streaks builds consistent habits.
-                    </p>
-                </div>
-                <div style="background: #f5f8fa; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                    <h5 style="margin: 0 0 8px 0; color: #106ba3; font-size: 14px;">📊 Daily Average Score (30 points max)</h5>
-                    <p style="color: #5c7080; font-size: 13px; line-height: 1.6; margin: 0;">
-                        Based on your average tasks per day. Each task/day adds 4 points (up to 7.5 tasks/day = 30 points).
-                        Higher daily output shows strong productivity.
-                    </p>
-                </div>
-                <div style="background: #f5f8fa; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                    <h5 style="margin: 0 0 8px 0; color: #0f9960; font-size: 14px;">📅 Consistency Score (20 points max)</h5>
-                    <p style="color: #5c7080; font-size: 13px; line-height: 1.6; margin: 0;">
-                        Percentage of days with tasks in the last 30 days. Working regularly (even with fewer tasks) 
-                        is better than sporadic bursts.
-                    </p>
-                </div>
-                <div style="background: #f5f8fa; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
-                    <h5 style="margin: 0 0 8px 0; color: #d9822b; font-size: 14px;">⚡ Velocity Score (20 points max)</h5>
-                    <p style="color: #5c7080; font-size: 13px; line-height: 1.6; margin: 0;">
-                        Rewards quick task completion. Faster average completion time = higher score. 
-                        Tasks completed in under 48 hours contribute to this score.
-                    </p>
-                </div>
-                <p style="color: #5c7080; line-height: 1.6; margin-top: 12px;">
-                    Each component is displayed with its own progress bar in the Overview tab, helping you identify areas for improvement.
-                </p>
-            </div>
-            
-            <div style="margin-bottom: 24px;">
-                <h4 style="margin: 0 0 12px 0; color: #182026; font-size: 16px; font-weight: 600;">🏆 Achievements</h4>
-                <p style="color: #5c7080; line-height: 1.6; margin-bottom: 12px;">
-                    Unlock achievements by reaching various milestones in your task completion journey. 
-                    Achievements are divided into categories:
-                </p>
-                <ul style="color: #5c7080; line-height: 1.8; margin-left: 20px;">
-                    <li><strong>Milestone Achievements:</strong> Total tasks completed (10, 50, 100, 500, 1000+)</li>
-                    <li><strong>Streak Achievements:</strong> Consecutive days (3, 7, 14, 30, 100 days)</li>
-                    <li><strong>Daily Achievements:</strong> Tasks in a single day (5, 10, 20 tasks)</li>
-                    <li><strong>Speed Achievements:</strong> Quick task completion</li>
-                    <li><strong>Consistency Achievements:</strong> Regular task completion patterns</li>
-                    <li><strong>Time-based Achievements:</strong> Early bird, night owl patterns</li>
-                </ul>
-            </div>
-            
-            <div style="margin-bottom: 24px;">
-                <h4 style="margin: 0 0 12px 0; color: #182026; font-size: 16px; font-weight: 600;">📈 Level System</h4>
-                <p style="color: #5c7080; line-height: 1.6;">
-                    Each completed task earns you 10 XP. Your level increases as you accumulate XP:
-                </p>
-                <ul style="color: #5c7080; line-height: 1.8; margin-left: 20px;">
-                    <li>Level 1: 0 XP</li>
-                    <li>Level 2: 100 XP (10 tasks)</li>
-                    <li>Level 3: 300 XP (30 tasks)</li>
-                    <li>Level 4: 600 XP (60 tasks)</li>
-                    <li>And so on... (each level requires more XP)</li>
-                </ul>
-            </div>
-            
-            <div>
-                <h4 style="margin: 0 0 12px 0; color: #182026; font-size: 16px; font-weight: 600;">💡 Tips</h4>
-                <ul style="color: #5c7080; line-height: 1.8; margin-left: 20px;">
-                    <li>Mark tasks as {{[[DONE]]}} to track them</li>
-                    <li>Use #tags to categorize your tasks</li>
-                    <li>Complete tasks daily to maintain streaks</li>
-                    <li>Check the logbook to review past completions</li>
-                </ul>
-            </div>
+    levelCard.innerHTML = `
+        <div style="font-size: 48px; font-weight: bold; margin-bottom: 8px;">Level ${levelData.level}</div>
+        <div style="font-size: 18px; margin-bottom: 16px;">${formatNumber(levelData.xpInCurrentLevel)} / ${formatNumber(levelData.xpForNextLevel)} XP</div>
+        <div style="background: rgba(255,255,255,0.2); height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 16px;">
+            <div style="background: white; height: 100%; width: ${levelData.progressPercent}%; transition: width 0.5s;"></div>
         </div>
+        <div style="font-size: 16px; opacity: 0.9;">Total Tasks Completed: ${formatNumber(analytics.totalCompleted)}</div>
     `;
     
-    handbookPanel.appendChild(handbookSection);
-    
-    // Add all panels to the container
-    panelsContainer.appendChild(overviewPanel);
-    panelsContainer.appendChild(chartsPanel);
-    panelsContainer.appendChild(logbookPanel);
-    panelsContainer.appendChild(achievementPanel);
-    panelsContainer.appendChild(handbookPanel);
+    section.appendChild(levelCard);
+    return section;
 }
 
-// Main function to show todo analysis
-async function showTodoAnalysisPopup() {
-    const { overlay, content } = createPopup();
-    document.body.appendChild(overlay);
+function createAchievementsSection(achievements) {
+    const section = document.createElement("div");
     
-    try {
-        // Show loading state
-        content.innerHTML = `
-            <div style="text-align: center; padding: 40px;">
-                <div class="bp3-spinner">
-                    <div class="bp3-spinner-animation"></div>
-                </div>
-                <div style="margin-top: 16px; color: #5c7080;">Analyzing your todos...</div>
-            </div>
-        `;
+    // Achievement stats
+    const stats = document.createElement("div");
+    stats.style.cssText = "margin-bottom: 24px; text-align: center;";
+    stats.innerHTML = `
+        <div style="font-size: 20px; color: #182026; font-weight: 600;">
+            ${achievements.achieved.length} / ${achievements.all.length} Achievements Unlocked
+        </div>
+    `;
+    section.appendChild(stats);
+    
+    // Achievement categories
+    const categories = ['streak', 'milestone', 'daily', 'speed', 'time', 'pattern', 'organization', 'consistency', 'special', 'fun'];
+    
+    categories.forEach(category => {
+        const categoryAchievements = achievements.all.filter(a => a.category === category);
+        if (categoryAchievements.length === 0) return;
         
-        // Add timestamp to prevent caching
-        console.log("Fetching todo data at:", new Date().toISOString());
+        const categorySection = document.createElement("div");
+        categorySection.style.cssText = "margin-bottom: 24px;";
         
-        // Fetch DONE todos and total TODOs in parallel
-        const [doneBlocks, totalTodos] = await Promise.all([
-            getTodoBlocks("DONE"),
-            getTotalTodos()
-        ]);
+        const categoryTitle = document.createElement("h4");
+        categoryTitle.style.cssText = "margin: 0 0 12px 0; color: #182026; text-transform: capitalize;";
+        categoryTitle.textContent = category;
+        categorySection.appendChild(categoryTitle);
         
-        if (doneBlocks.length === 0) {
-            content.innerHTML = `
-                <div style="text-align: center; padding: 40px; color: #5c7080;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
-                    <div style="font-size: 18px;">No completed todos found!</div>
-                    <div style="font-size: 14px; margin-top: 8px;">Complete some todos marked with {{[[DONE]]}} to see analytics.</div>
-                </div>
+        const achievementGrid = document.createElement("div");
+        achievementGrid.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;";
+        
+        categoryAchievements.forEach(achievement => {
+            const card = document.createElement("div");
+            const isAchieved = achievement.requirement;
+            card.style.cssText = `
+                padding: 12px;
+                border-radius: 8px;
+                text-align: center;
+                cursor: pointer;
+                transition: all 0.2s;
+                ${isAchieved ? 
+                    'background: #f5f8fa; border: 2px solid #0f9960;' : 
+                    'background: #f5f8fa; border: 1px solid #e1e8ed; opacity: 0.6;'}
             `;
-            return;
-        }
-        
-        // Calculate streak and daily average
-        const { streak, dailyAverage, dailyCounts } = calculateStreakAndAverage(doneBlocks);
-        
-        // Generate analytics
-        const analytics = generateTodoAnalytics(doneBlocks);
-        analytics.streak = streak;
-        analytics.dailyAverage = dailyAverage;
-        analytics.totalTodos = totalTodos;
-        analytics.dailyCounts = dailyCounts;
-        
-        // Display analytics
-        displayAnalytics(content, analytics);
-        
-    } catch (error) {
-        console.error("Error generating todo analysis:", error);
-        content.innerHTML = `
-            <div style="text-align: center; padding: 40px; color: #d13913;">
-                <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
-                <div style="font-size: 18px;">Error generating analysis</div>
-                <div style="font-size: 14px; margin-top: 8px;">${error.message}</div>
-            </div>
-        `;
-    }
-}
-
-// Create topbar button
-function createTopbarButton() {
-    const createIconButton = (icon) => {
-        const button = document.createElement("span");
-        button.className = "bp3-button bp3-minimal bp3-small todo-analysis-toggle";
-        button.tabIndex = 0;
-
-        const iconSpan = document.createElement("span");
-        iconSpan.className = `bp3-icon bp3-icon-${icon}`;
-        
-        // Add custom icon as fallback
-        iconSpan.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M1 13v2h14v-2H1zm0-3h3V3H1v7zm5 0h3V5H6v5zm5 0h3V1h-3v9z"/>
-            </svg>
-        `;
-
-        button.appendChild(iconSpan);
-        button.title = "Todo Analysis";
-        return button;
-    };
-
-    const nameToUse = "todoAnalysis";
-    const checkForButton = document.getElementById(`${nameToUse}-flex-space`);
-    
-    if (!checkForButton) {
-        const mainButton = createIconButton("chart");
-        const roamTopbar = document.getElementsByClassName("rm-topbar")[0];
-        
-        if (roamTopbar) {
-            const nextIconButton = roamTopbar.lastElementChild;
-            const flexDiv = document.createElement("div");
-            flexDiv.className = "rm-topbar__spacer-sm todo-analysis-toggle";
-            flexDiv.id = nameToUse + "-flex-space";
-
-            const flexDivAfter = document.createElement("div");
-            flexDivAfter.className = "rm-topbar__spacer-sm todo-analysis-toggle";
-            flexDivAfter.id = nameToUse + "-flex-space-after";
             
-            nextIconButton.insertAdjacentElement("afterend", mainButton);
-            mainButton.insertAdjacentElement("beforebegin", flexDiv);
-            mainButton.insertAdjacentElement("afterend", flexDivAfter);
-            mainButton.addEventListener("click", showTodoAnalysisPopup);
+            card.innerHTML = `
+                <div style="font-size: 32px; margin-bottom: 8px; ${!isAchieved ? 'filter: grayscale(1);' : ''}">${achievement.icon}</div>
+                <div style="font-size: 12px; font-weight: 600; color: ${isAchieved ? '#182026' : '#5c7080'}; margin-bottom: 4px;">${achievement.name}</div>
+                <div style="font-size: 11px; color: #5c7080;">${achievement.desc}</div>
+            `;
             
-            console.log("Added Todo Analysis button to topbar");
-        }
-    }
-}
-
-// Destroy topbar button
-function destroyTopbarButton() {
-    // Remove all parts of the button
-    const toggles = document.querySelectorAll(".todo-analysis-toggle");
-    toggles.forEach(tog => {
-        tog.remove();
+            card.onmouseenter = () => {
+                if (isAchieved) {
+                    card.style.transform = "scale(1.05)";
+                    card.style.boxShadow = "0 4px 12px rgba(0,0,0,0.1)";
+                }
+            };
+            
+            card.onmouseleave = () => {
+                card.style.transform = "scale(1)";
+                card.style.boxShadow = "none";
+            };
+            
+            achievementGrid.appendChild(card);
+        });
+        
+        categorySection.appendChild(achievementGrid);
+        section.appendChild(categorySection);
     });
+    
+    return section;
 }
+// ========== Main extension code ==========
 
-// Extension lifecycle
-function onload({ extensionAPI }) {
-    console.log("Todo Analysis extension loaded");
-    
-    // Add button to topbar
-    createTopbarButton();
-    
-    // Also register command palette command
-    try {
-        if (extensionAPI?.ui?.commandPalette?.addCommand) {
-            extensionAPI.ui.commandPalette.addCommand({
-                label: "Todo Analysis",
-                callback: showTodoAnalysisPopup
-            });
-            console.log("Todo Analysis command registered via extensionAPI");
-        } else if (window.roamAlphaAPI?.ui?.commandPalette?.addCommand) {
-            window.roamAlphaAPI.ui.commandPalette.addCommand({
-                label: "Todo Analysis",
-                callback: showTodoAnalysisPopup
-            });
-            console.log("Todo Analysis command registered via window.roamAlphaAPI");
+const POPUP_ID = "todo-analysis-popup";
+
+// Main extension object
+window.roamExtensions = window.roamExtensions || {};
+window.roamExtensions['todo-analysis'] = {
+    onload: ({ extensionAPI }) => {
+        console.log("Todo Analysis extension loading...");
+        
+        // Add topbar button
+        const topbar = document.querySelector(".rm-topbar");
+        if (topbar) {
+            const button = createTopbarButton();
+            
+            // Find the right place to insert (after the graph icon)
+            const graphIcon = topbar.querySelector(".bp3-icon-graph");
+            if (graphIcon && graphIcon.parentElement) {
+                graphIcon.parentElement.insertAdjacentElement('afterend', button);
+            } else {
+                // Fallback: add to end of topbar
+                topbar.appendChild(button);
+            }
+            
+            console.log("Todo Analysis button added to topbar");
+        } else {
+            console.warn("Topbar not found - Todo Analysis button not added");
         }
-    } catch (error) {
-        console.error("Error registering command:", error);
-    }
-}
-
-function onunload() {
-    console.log("Todo Analysis extension unloaded");
+        
+        console.log("Todo Analysis extension loaded successfully");
+    },
     
-    // Remove any open popups
-    const popup = document.getElementById(POPUP_ID);
-    if (popup) {
-        popup.remove();
-    }
-    
-    // Remove topbar button
-    destroyTopbarButton();
-    
-    // Try to remove command from command palette
-    try {
-        if (window.roamAlphaAPI?.ui?.commandPalette?.removeCommand) {
-            window.roamAlphaAPI.ui.commandPalette.removeCommand({
-                label: "Todo Analysis"
-            });
+    onunload: () => {
+        console.log("Todo Analysis extension unloading...");
+        
+        // Remove topbar button
+        const button = document.getElementById("todo-analysis-button");
+        if (button) {
+            button.remove();
         }
-    } catch (error) {
-        // Ignore errors during cleanup
+        
+        // Remove popup if open
+        const popup = document.getElementById(POPUP_ID);
+        if (popup) {
+            popup.remove();
+        }
+        
+        console.log("Todo Analysis extension unloaded");
     }
-}
-
-export default {
-    onload: onload,
-    onunload: onunload
 };
+
+// Export for Roam
+export default window.roamExtensions['todo-analysis'];
