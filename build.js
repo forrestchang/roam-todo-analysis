@@ -41,8 +41,6 @@ Object.entries(modules).forEach(([name, code]) => {
 bundledCode += `
 // ========== Main extension code ==========
 
-const POPUP_ID = "todo-analysis-popup";
-
 // Main extension object
 export default {
     onload: ({ extensionAPI }) => {

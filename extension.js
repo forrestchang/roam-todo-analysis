@@ -1878,8 +1878,6 @@ function createAchievementsSection(achievements) {
 }
 // ========== Main extension code ==========
 
-const POPUP_ID = "todo-analysis-popup";
-
 // Main extension object
 window.roamExtensions = window.roamExtensions || {};
 window.roamExtensions['todo-analysis'] = {
