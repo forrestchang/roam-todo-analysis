@@ -1,0 +1,27 @@
+{
+  "name": "todo-analysis-extension",
+  "version": "2.0.0",
+  "description": "A Roam Research extension for comprehensive TODO analytics",
+  "main": "extension.js",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js && echo 'Bundled file created. Use extension-bundled.js in Roam.'"
+  },
+  "keywords": [
+    "roam-research",
+    "roam-extension",
+    "todo",
+    "analytics",
+    "productivity"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {},
+  "files": [
+    "extension.js",
+    "extension.css",
+    "README.md",
+    "src/",
+    "build.js"
+  ]
+}
