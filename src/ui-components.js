@@ -1,5 +1,5 @@
 // UI Components for the Todo Analysis extension
-import { getLocalDateString, getTotalTodos } from './queries.js';
+import { getLocalDateString, getTotalTodos, getTodoBlocks } from './queries.js';
 import { formatNumber, getScoreEmoji } from './utils.js';
 import { calculateStreakAndAverage, generateTodoAnalytics, calculateProductivityScore, calculateLevelAndXP } from './analytics.js';
 import { calculateAchievements } from './achievements.js';
@@ -219,7 +219,6 @@ export function createPopup() {
         // Reload the data
         setTimeout(async () => {
             try {
-                const { getTodoBlocks } = await import('./queries.js');
                 const [doneBlocks, totalTodos] = await Promise.all([
                     getTodoBlocks("DONE"),
                     getTotalTodos()
@@ -252,7 +251,7 @@ export function createPopup() {
 export function createTopbarButton() {
     const button = document.createElement("button");
     button.id = "todo-analysis-button";
-    button.className = "bp3-button bp3-minimal bp3-icon-timeline-events";
+    button.className = "bp3-button bp3-minimal bp3-icon-chart";
     button.title = "Todo Analysis";
     button.style.cssText = "margin: 0 4px;";
     
@@ -275,7 +274,6 @@ export function createTopbarButton() {
         
         // Fetch data and generate analytics
         try {
-            const { getTodoBlocks } = await import('./queries.js');
             const [doneBlocks, totalTodos] = await Promise.all([
                 getTodoBlocks("DONE"),
                 getTotalTodos()

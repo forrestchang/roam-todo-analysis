@@ -29,7 +29,7 @@ Object.entries(modules).forEach(([name, code]) => {
     let processedCode = code.replace(/^import\s+.*?from\s+['"].*?['"];?\s*$/gm, '');
     
     // Remove export keywords but keep the functions/constants
-    processedCode = processedCode.replace(/^export\s+(function|const|let|var)\s+/gm, '$1 ');
+    processedCode = processedCode.replace(/^export\s+(async\s+)?(function|const|let|var)\s+/gm, '$1$2 ');
     processedCode = processedCode.replace(/^export\s+\{[^}]+\};?\s*$/gm, '');
     processedCode = processedCode.replace(/^export\s+default\s+/gm, '');
     

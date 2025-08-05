@@ -124,6 +124,7 @@ function getWeekNumber(date) {
 
 // Format number with commas
 function formatNumber(num) {
+    if (num === undefined || num === null) return '0';
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
@@ -321,6 +322,9 @@ function calculateLevelAndXP(totalCompleted) {
         level,
         xp: xpInCurrentLevel,
         xpRequired: xpForCurrentLevel,
+        xpInCurrentLevel: xpInCurrentLevel,
+        xpForNextLevel: xpForCurrentLevel,
+        progressPercent: Math.round(xpProgress),
         xpProgress: Math.round(xpProgress)
     };
 }
@@ -1403,7 +1407,7 @@ function createPopup() {
 function createTopbarButton() {
     const button = document.createElement("button");
     button.id = "todo-analysis-button";
-    button.className = "bp3-button bp3-minimal bp3-icon-timeline-events";
+    button.className = "bp3-button bp3-minimal bp3-icon-chart";
     button.title = "Todo Analysis";
     button.style.cssText = "margin: 0 4px;";
     
@@ -1879,8 +1883,7 @@ function createAchievementsSection(achievements) {
 // ========== Main extension code ==========
 
 // Main extension object
-window.roamExtensions = window.roamExtensions || {};
-window.roamExtensions['todo-analysis'] = {
+export default {
     onload: ({ extensionAPI }) => {
         console.log("Todo Analysis extension loading...");
         
@@ -1924,6 +1927,3 @@ window.roamExtensions['todo-analysis'] = {
         console.log("Todo Analysis extension unloaded");
     }
 };
-
-// Export for Roam
-export default window.roamExtensions['todo-analysis'];

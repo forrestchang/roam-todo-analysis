@@ -183,6 +183,9 @@ export function calculateLevelAndXP(totalCompleted) {
         level,
         xp: xpInCurrentLevel,
         xpRequired: xpForCurrentLevel,
+        xpInCurrentLevel: xpInCurrentLevel,
+        xpForNextLevel: xpForCurrentLevel,
+        progressPercent: Math.round(xpProgress),
         xpProgress: Math.round(xpProgress)
     };
 }
