@@ -1,0 +1,268 @@
+.todo-analysis-overlay {
+    animation: fadeIn 0.2s ease;
+}
+
+.todo-analysis-popup {
+    animation: slideIn 0.2s ease;
+}
+
+.todo-analysis-content {
+    scrollbar-width: thin;
+    scrollbar-color: #c1c7cd #f5f8fa;
+}
+
+.todo-analysis-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.todo-analysis-content::-webkit-scrollbar-track {
+    background: #f5f8fa;
+    border-radius: 4px;
+}
+
+.todo-analysis-content::-webkit-scrollbar-thumb {
+    background: #c1c7cd;
+    border-radius: 4px;
+}
+
+.todo-analysis-content::-webkit-scrollbar-thumb:hover {
+    background: #a7b1bb;
+}
+
+/* Chart styling */
+.chart-container {
+    background: white;
+    padding: 16px;
+    border-radius: 4px;
+    border: 1px solid #e1e8ed;
+    overflow: hidden;
+}
+
+.chart-container h4 {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.chart-container > div > div > div:hover {
+    opacity: 0.8;
+}
+
+/* For hour chart specifically */
+.chart-container[data-chart-type="hour"] .chart-label {
+    font-size: 8px !important;
+}
+
+/* Analytics sections */
+.analytics-section {
+    margin-bottom: 24px;
+}
+
+.analytics-section h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #182026;
+    margin: 0 0 16px 0;
+}
+
+.analytics-section h4 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #182026;
+}
+
+/* Tag styling */
+.bp3-tag {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+/* Topbar button styling */
+.todo-analysis-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.todo-analysis-toggle:hover {
+    background-color: rgba(92, 112, 128, 0.12);
+}
+
+.todo-analysis-toggle .bp3-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.todo-analysis-toggle .bp3-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Logbook styling */
+.todo-analysis-content input[type="date"] {
+    font-family: inherit;
+}
+
+/* Dark mode support */
+.bp3-dark .todo-analysis-popup {
+    background: #30404d;
+    color: #f5f8fa;
+}
+
+.bp3-dark .analytics-section {
+    background: #394b59 !important;
+}
+
+.bp3-dark .analytics-section > div {
+    background: #394b59 !important;
+    color: #f5f8fa;
+}
+
+.bp3-dark .analytics-section > div > div {
+    background: #30404d !important;
+    border-color: #5c7080 !important;
+}
+
+.bp3-dark .chart-container {
+    background: #394b59;
+    border-color: #5c7080;
+}
+
+.bp3-dark .chart-container h4,
+.bp3-dark .analytics-section h4 {
+    color: #f5f8fa;
+}
+
+.bp3-dark .bp3-tag {
+    background: #5c7080 !important;
+    color: #f5f8fa !important;
+}
+
+.bp3-dark .todo-analysis-content::-webkit-scrollbar-track {
+    background: #394b59;
+}
+
+.bp3-dark .todo-analysis-content::-webkit-scrollbar-thumb {
+    background: #5c7080;
+}
+
+.bp3-dark .todo-analysis-content::-webkit-scrollbar-thumb:hover {
+    background: #738694;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .todo-analysis-popup {
+        padding: 16px !important;
+    }
+    
+    .chart-container {
+        padding: 12px;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Heatmap calendar */
+.todo-analysis-content .heatmap-cell {
+    position: relative;
+}
+
+/* Ensure cells maintain proper stacking */
+.todo-analysis-content .heatmap-cell:hover {
+    z-index: 100;
+}
+
+/* Tooltip arrow */
+.todo-analysis-content .heatmap-cell > div::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 4px;
+    border-style: solid;
+    border-color: #182026 transparent transparent transparent;
+}
+
+/* Tab styling */
+.todo-analysis-content .bp3-tabs {
+    margin-bottom: 20px;
+}
+
+.todo-analysis-content .bp3-tab-list {
+    background: transparent;
+    border-bottom: 1px solid #e1e8ed;
+    margin-bottom: 20px;
+}
+
+.todo-analysis-content .bp3-tab {
+    font-size: 14px;
+    font-weight: 500;
+    color: #5c7080;
+    padding: 8px 16px;
+    margin-right: 8px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.todo-analysis-content .bp3-tab:hover {
+    color: #182026;
+}
+
+.todo-analysis-content .bp3-tab-selected {
+    color: #106ba3;
+    border-bottom-color: #106ba3;
+}
+
+.todo-analysis-content .bp3-tab-panel {
+    padding-top: 0;
+}
+
+/* Dark mode tab styling */
+.bp3-dark .todo-analysis-content .bp3-tab-list {
+    border-bottom-color: #5c7080;
+}
+
+.bp3-dark .todo-analysis-content .bp3-tab {
+    color: #a7b1bb;
+}
+
+.bp3-dark .todo-analysis-content .bp3-tab:hover {
+    color: #f5f8fa;
+}
+
+.bp3-dark .todo-analysis-content .bp3-tab-selected {
+    color: #48aff0;
+    border-bottom-color: #48aff0;
+}
+
+/* Productivity score components dark mode */
+.bp3-dark .todo-analysis-content .productivity-component {
+    background: #394b59 !important;
+    border-color: #5c7080 !important;
+}
+
+.bp3-dark .todo-analysis-content .productivity-component span {
+    color: #f5f8fa !important;
+}
