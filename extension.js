@@ -804,12 +804,17 @@ function createLast12DaysTrend(dailyCounts) {
             bar.appendChild(countLabel);
         }
         
+        // Get weekday name
+        const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const weekdayName = weekdays[date.getDay()];
+        
         const labelEl = document.createElement("div");
-        labelEl.textContent = date.getDate();
-        labelEl.style.cssText = "font-size: 11px; color: #5c7080; margin-top: 6px; text-align: center;";
+        // Show weekday and date
+        labelEl.innerHTML = `${weekdayName}<br>${date.getDate()}`;
+        labelEl.style.cssText = "font-size: 10px; color: #5c7080; margin-top: 6px; text-align: center; line-height: 1.2;";
         
         if (isToday) {
-            labelEl.innerHTML = `<strong>Today</strong>`;
+            labelEl.innerHTML = `<strong>Today</strong><br>${weekdayName}`;
             labelEl.style.color = "#0f9960";
         }
         
