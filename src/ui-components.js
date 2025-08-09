@@ -3,7 +3,7 @@ import { getLocalDateString, getTotalTodos, getTodoBlocks, getArchivedBlocks, ge
 import { formatNumber, getScoreEmoji, fuzzySearch, fuzzySearchScore } from './utils.js';
 import { calculateStreakAndAverage, generateTodoAnalytics, calculateProductivityScore, calculateLevelAndXP } from './analytics.js';
 import { calculateAchievements } from './achievements.js';
-import { createLast12DaysTrend, createLast12WeeksTrend, createLast12MonthsTrend, createHeatmapCalendar, createBarChart } from './charts.js';
+import { createLast12DaysTrend, createLast12WeeksTrend, createLast12MonthsTrend, createHeatmapCalendar, createBarChart, createWeeklyHeatmap } from './charts.js';
 
 const POPUP_ID = "todo-analysis-popup";
 
@@ -1078,6 +1078,15 @@ function createChartsPanel(tabPanels, container, analytics) {
     chartsGrid.appendChild(weekdayChart);
     
     panel.appendChild(chartsGrid);
+    
+    // Weekly heatmap (7x24)
+    const weeklyHeatmapTitle = document.createElement("h3");
+    weeklyHeatmapTitle.textContent = "Weekly Pattern";
+    weeklyHeatmapTitle.style.cssText = "margin: 24px 0 16px 0; color: #182026; font-size: 18px; font-weight: 600;";
+    panel.appendChild(weeklyHeatmapTitle);
+    
+    const weeklyHeatmap = createWeeklyHeatmap(analytics.blocks || []);
+    panel.appendChild(weeklyHeatmap);
     
     // Heatmap calendar
     const heatmapTitle = document.createElement("h3");

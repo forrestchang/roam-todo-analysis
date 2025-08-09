@@ -596,3 +596,178 @@ export function createLast12MonthsTrend(dailyCounts) {
     container.appendChild(chartWrapper);
     return container;
 }
+
+// Create 7x24 weekly heatmap (days of week vs hours of day)
+export function createWeeklyHeatmap(completedTasks) {
+    // Handle undefined or null input
+    const tasks = completedTasks || [];
+    console.log("[Weekly Heatmap] Creating with tasks:", tasks.length);
+    
+    const container = document.createElement("div");
+    container.className = "chart-container";
+    
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = "Weekly Activity Heatmap (7 Days × 24 Hours)";
+    titleEl.style.cssText = "margin: 0 0 12px 0; color: #182026;";
+    container.appendChild(titleEl);
+    
+    // Initialize data structure: 7 days x 24 hours (Monday-Sunday order)
+    const heatmapData = Array(7).fill().map(() => Array(24).fill(0));
+    
+    // Aggregate task completion by day of week and hour
+    tasks.forEach(task => {
+        // Use editTime instead of time, as that's what the blocks have
+        if (task.editTime) {
+            const date = new Date(task.editTime);
+            let dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+            // Convert to Monday-first index: Sunday (0) becomes 6, Monday (1) becomes 0, etc.
+            dayOfWeek = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+            const hour = date.getHours(); // 0-23
+            heatmapData[dayOfWeek][hour]++;
+        }
+    });
+    
+    // Find max value for color scaling
+    const maxValue = Math.max(...heatmapData.flat(), 1);
+    
+    // Create heatmap wrapper
+    const heatmapWrapper = document.createElement("div");
+    heatmapWrapper.style.cssText = "background: #f5f8fa; border-radius: 8px; padding: 16px; overflow-x: auto;";
+    
+    // Create main grid container
+    const gridContainer = document.createElement("div");
+    gridContainer.style.cssText = "display: flex; gap: 8px; min-width: fit-content;";
+    
+    // Day labels (left side) - Monday first
+    const dayLabels = document.createElement("div");
+    dayLabels.style.cssText = "display: flex; flex-direction: column; gap: 2px; margin-top: 30px; width: 50px;";
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    days.forEach(day => {
+        const label = document.createElement("div");
+        label.textContent = day;
+        label.style.cssText = "height: 20px; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font-size: 11px; color: #5c7080;";
+        dayLabels.appendChild(label);
+    });
+    gridContainer.appendChild(dayLabels);
+    
+    // Create hour columns container
+    const hoursContainer = document.createElement("div");
+    hoursContainer.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
+    
+    // Hour labels (top)
+    const hourLabels = document.createElement("div");
+    hourLabels.style.cssText = "display: flex; gap: 2px; height: 25px; margin-bottom: 4px;";
+    for (let hour = 0; hour < 24; hour++) {
+        const label = document.createElement("div");
+        // Show label for every 3 hours to avoid crowding
+        if (hour % 3 === 0) {
+            label.textContent = hour === 0 ? '12a' : hour < 12 ? `${hour}a` : hour === 12 ? '12p' : `${hour-12}p`;
+        }
+        label.style.cssText = "width: 20px; font-size: 10px; color: #5c7080; text-align: center;";
+        hourLabels.appendChild(label);
+    }
+    hoursContainer.appendChild(hourLabels);
+    
+    // Create heatmap grid
+    const heatmapGrid = document.createElement("div");
+    heatmapGrid.style.cssText = "display: flex; flex-direction: column; gap: 2px;";
+    
+    // Create cells for each day
+    for (let day = 0; day < 7; day++) {
+        const dayRow = document.createElement("div");
+        dayRow.style.cssText = "display: flex; gap: 2px;";
+        
+        for (let hour = 0; hour < 24; hour++) {
+            const value = heatmapData[day][hour];
+            const intensity = maxValue > 0 ? value / maxValue : 0;
+            
+            const cell = document.createElement("div");
+            cell.style.cssText = `
+                width: 20px;
+                height: 20px;
+                border-radius: 3px;
+                cursor: pointer;
+                transition: all 0.2s;
+                position: relative;
+            `;
+            
+            // Color based on intensity
+            if (value === 0) {
+                cell.style.background = "#e1e8ed";
+            } else if (intensity <= 0.25) {
+                cell.style.background = "#bee3f8";
+            } else if (intensity <= 0.5) {
+                cell.style.background = "#63b3ed";
+            } else if (intensity <= 0.75) {
+                cell.style.background = "#3182ce";
+            } else {
+                cell.style.background = "#2c5282";
+            }
+            
+            // Create tooltip
+            const tooltip = document.createElement("div");
+            const hourStr = hour === 0 ? '12:00 AM' : hour < 12 ? `${hour}:00 AM` : hour === 12 ? '12:00 PM' : `${hour-12}:00 PM`;
+            tooltip.textContent = `${days[day]} ${hourStr}: ${value} ${value === 1 ? 'task' : 'tasks'}`;
+            tooltip.style.cssText = `
+                position: absolute;
+                bottom: 100%;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #182026;
+                color: white;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                white-space: nowrap;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 0.2s;
+                margin-bottom: 4px;
+                z-index: 1000;
+            `;
+            cell.appendChild(tooltip);
+            
+            // Hover effects
+            cell.onmouseenter = () => {
+                cell.style.transform = "scale(1.2)";
+                cell.style.boxShadow = "0 2px 4px rgba(0,0,0,0.2)";
+                cell.style.zIndex = "10";
+                tooltip.style.opacity = "1";
+            };
+            
+            cell.onmouseleave = () => {
+                cell.style.transform = "scale(1)";
+                cell.style.boxShadow = "none";
+                cell.style.zIndex = "1";
+                tooltip.style.opacity = "0";
+            };
+            
+            dayRow.appendChild(cell);
+        }
+        
+        heatmapGrid.appendChild(dayRow);
+    }
+    
+    hoursContainer.appendChild(heatmapGrid);
+    gridContainer.appendChild(hoursContainer);
+    heatmapWrapper.appendChild(gridContainer);
+    
+    // Add legend
+    const legend = document.createElement("div");
+    legend.style.cssText = "display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 11px; color: #5c7080;";
+    legend.innerHTML = `
+        <span>Less</span>
+        <div style="display: flex; gap: 3px;">
+            <div style="width: 16px; height: 16px; background: #e1e8ed; border-radius: 2px;"></div>
+            <div style="width: 16px; height: 16px; background: #bee3f8; border-radius: 2px;"></div>
+            <div style="width: 16px; height: 16px; background: #63b3ed; border-radius: 2px;"></div>
+            <div style="width: 16px; height: 16px; background: #3182ce; border-radius: 2px;"></div>
+            <div style="width: 16px; height: 16px; background: #2c5282; border-radius: 2px;"></div>
+        </div>
+        <span>More</span>
+    `;
+    heatmapWrapper.appendChild(legend);
+    
+    container.appendChild(heatmapWrapper);
+    return container;
+}
